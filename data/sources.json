@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "sources": [
+    {
+      "added_at": "2026-01-01",
+      "feed_url": "https://oneusefulthing.org/feed",
+      "groups": [
+        "Substack"
+      ],
+      "id": "one-useful-thing",
+      "kind": "substack",
+      "last_reviewed_at": null,
+      "notes": "Example public newsletter feed. Replace or remove this in your own setup.",
+      "profiles": [
+        "me"
+      ],
+      "site_url": "https://oneusefulthing.org",
+      "source": "example",
+      "status": "active",
+      "tags": [],
+      "title": "One Useful Thing"
+    },
+    {
+      "added_at": "2026-01-01",
+      "feed_url": "https://feeds.soundcloud.com/users/soundcloud:users:219478/sounds.rss",
+      "groups": [
+        "SoundCloud"
+      ],
+      "id": "soundcloud-example",
+      "kind": "podcast",
+      "last_reviewed_at": null,
+      "notes": "Example direct HTTPS RSS feed. Direct feeds do not need the hosted bridge.",
+      "profiles": [
+        "me"
+      ],
+      "site_url": "https://soundcloud.com/ninja-tune",
+      "source": "example",
+      "status": "candidate",
+      "tags": [],
+      "title": "SoundCloud: Ninja Tune"
+    },
+    {
+      "added_at": "2026-01-01",
+      "feed_url": "https://www.youtube.com/feeds/videos.xml?channel_id=UC_x5XG1OV2P6uZZ5FSM9Ttw",
+      "groups": [
+        "YouTube"
+      ],
+      "id": "youtube-google-developers",
+      "kind": "youtube",
+      "last_reviewed_at": null,
+      "notes": "Example YouTube RSS feed using a stable channel id.",
+      "profiles": [
+        "me"
+      ],
+      "site_url": "https://www.youtube.com/channel/UC_x5XG1OV2P6uZZ5FSM9Ttw",
+      "source": "example",
+      "status": "candidate",
+      "tags": [],
+      "title": "YouTube: Google Developers"
+    }
+  ]
+}

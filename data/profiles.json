@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "profiles": [
+    {
+      "id": "me",
+      "display_name": "Me",
+      "default_reader": "NetNewsWire",
+      "devices": [
+        {
+          "id": "mac",
+          "label": "Mac",
+          "reader": "NetNewsWire"
+        }
+      ]
+    }
+  ]
+}
