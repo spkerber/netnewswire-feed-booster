@@ -49,6 +49,8 @@ Require explicit approval before an agent does any of these tasks:
 
 Never give an agent a provider password, MFA code, GitHub personal access token, or a paid-feed URL in a public conversation. A local agent can read an ignored `data/private.env` when needed without printing its values.
 
+`list` redacts feed URLs by default. Do not use `list --show-sensitive` in output you plan to paste or share: hosted generated-feed URLs include the access token.
+
 ## First-Time Setup
 
 ```bash

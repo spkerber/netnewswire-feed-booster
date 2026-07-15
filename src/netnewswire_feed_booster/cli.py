@@ -79,6 +79,11 @@ def build_parser() -> argparse.ArgumentParser:
     list_parser.add_argument("--profile", default=None)
     list_parser.add_argument("--status", default=None)
     list_parser.add_argument("--kind", default=None)
+    list_parser.add_argument(
+        "--show-sensitive",
+        action="store_true",
+        help="Include raw feed URLs. Omit this when sharing terminal output.",
+    )
 
     add_parser = subparsers.add_parser("add", help="Add a source")
     add_source_arguments(add_parser)
@@ -289,7 +294,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         sources = filtered_sources_with_private(store, private_store, profile=args.profile, status=args.status, kind=args.kind)
         for source in sources:
             groups = ", ".join(source.groups) if source.groups else "-"
-            print(f"{source.id}\t{source.status}\t{source.kind}\t{groups}\t{source.title}\t{source.feed_url}")
+            feed_url = source.feed_url if args.show_sensitive else "[redacted; use --show-sensitive]"
+            print(f"{source.id}\t{source.status}\t{source.kind}\t{groups}\t{source.title}\t{feed_url}")
         print(f"{len(sources)} sources")
         return 0
 

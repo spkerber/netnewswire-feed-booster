@@ -21,6 +21,33 @@ EMPTY_NETNEWSWIRE_OPML = """<?xml version="1.0" encoding="UTF-8"?>
 
 
 class CliTests(unittest.TestCase):
+    def test_list_redacts_feed_urls_unless_explicitly_requested(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            data_path = Path(tmp_dir) / "sources.json"
+            store = FeedStore(data_path)
+            store.add_or_update(
+                Source(
+                    id="private-feed",
+                    title="Private Feed",
+                    feed_url="https://example.modal.run/feeds/secret-token/bandcamp/private-feed.rss",
+                    kind="bandcamp",
+                    profiles=["test-user"],
+                )
+            )
+            store.save()
+
+            redacted_output = io.StringIO()
+            with redirect_stdout(redacted_output):
+                main(["--data", str(data_path), "list", "--profile", "test-user"])
+
+            sensitive_output = io.StringIO()
+            with redirect_stdout(sensitive_output):
+                main(["--data", str(data_path), "list", "--profile", "test-user", "--show-sensitive"])
+
+        self.assertNotIn("secret-token", redacted_output.getvalue())
+        self.assertIn("[redacted; use --show-sensitive]", redacted_output.getvalue())
+        self.assertIn("secret-token", sensitive_output.getvalue())
+
     def test_set_status_unsubscribed_records_subscription_history(self) -> None:
         with TemporaryDirectory() as tmp_dir:
             data_path = Path(tmp_dir) / "sources.json"

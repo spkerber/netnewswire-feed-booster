@@ -19,6 +19,8 @@ python3 -m netnewswire_feed_booster unsubscribe source-id another-source-id --re
 
 Use `add` only for a direct feed that does not have a source-specific command. Exact unsubscribe identifiers may be source IDs, site URLs, feed URLs, or unique titles.
 
+`list` redacts feed URLs. Use `--show-sensitive` only for a local inspection and never paste that output: generated-feed URLs contain the access token.
+
 ## Discovery And Audit
 
 ```bash
