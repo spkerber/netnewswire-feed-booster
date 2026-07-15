@@ -268,7 +268,10 @@ def main(argv: Optional[list[str]] = None) -> int:
             print("Dry run only. Re-run with --apply to write rebuilt generated-source metadata.")
             return 0
         apply_generated_source_migration(store, migration)
-        print(f"Rebuilt {migration.total} generated-source records in {args.data}")
+        print(
+            f"Applied generated-source migration in {args.data}: "
+            f"rebuilt {migration.total}, removed duplicates {len(migration.removals)}"
+        )
         return 0
 
     if args.command == "export-opml":
