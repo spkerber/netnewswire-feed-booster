@@ -100,3 +100,49 @@ class GeneratedSourceMigrationTests(unittest.TestCase):
 
         self.assertEqual(len(migration.replacements), 0)
         self.assertEqual(len(migration.conflicts), 1)
+
+    def test_replaces_legacy_feed_by_site_url_when_opml_id_differs(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            reference = FeedStore(root / "sources.old.json")
+            reference.add_or_update(
+                Source(
+                    id="radio-hydefm-archives",
+                    title="HydeFM Archives",
+                    feed_url="file:///old/radio-hydefm-archives.rss",
+                    site_url="https://hydefm.com/archives/",
+                    kind="other",
+                    profiles=["old"],
+                    groups=["HydeFM"],
+                    source="radio-local-generated",
+                )
+            )
+            reference.save()
+
+            target = FeedStore(root / "sources.trial.json")
+            target.add_or_update(
+                Source(
+                    id="hydefm-archives",
+                    title="HydeFM Archives",
+                    feed_url="https://old-host.example/feeds/old-token/generated/hydefm-archives.rss",
+                    site_url="https://hydefm.com/archives/",
+                    profiles=["trial"],
+                    groups=["HydeFM"],
+                    source="netnewswire-import",
+                )
+            )
+            target.save()
+
+            migration = plan_generated_source_migration(
+                reference,
+                target,
+                profile="trial",
+                bandcamp_out_dir=root / "exports/bandcamp",
+                generated_out_dir=root / "exports/generated",
+            )
+            apply_generated_source_migration(target, migration)
+            rebuilt = FeedStore(root / "sources.trial.json")
+
+        self.assertEqual(list(migration.replacements), ["hydefm-archives"])
+        self.assertIsNone(rebuilt.source_by_id("hydefm-archives"))
+        self.assertIsNotNone(rebuilt.source_by_id("radio-hydefm-archives"))

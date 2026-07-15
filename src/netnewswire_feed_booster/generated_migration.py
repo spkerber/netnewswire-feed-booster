@@ -4,6 +4,7 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List
+from urllib.parse import urlsplit, urlunsplit
 
 from .feed_store import FeedStore, Source
 
@@ -17,8 +18,9 @@ GENERATED_SOURCE_LABELS = {
 
 @dataclass
 class GeneratedSourceMigration:
-    replacements: List[Source]
+    replacements: Dict[str, Source]
     additions: List[Source]
+    removals: List[str]
     conflicts: List[str]
     source_counts: Dict[str, int]
 
@@ -39,9 +41,11 @@ def plan_generated_source_migration(
         for source in reference_store.sources()
         if source.status == "active" and source.source in GENERATED_SOURCE_LABELS
     ]
-    target_by_id = {source.id: source for source in target_store.sources()}
-    replacements: List[Source] = []
+    target_sources = target_store.sources()
+    target_by_id = {source.id: source for source in target_sources}
+    replacements: Dict[str, Source] = {}
     additions: List[Source] = []
+    removals: List[str] = []
     conflicts: List[str] = []
 
     for source in reference_sources:
@@ -52,18 +56,30 @@ def plan_generated_source_migration(
             generated_out_dir=generated_out_dir,
         )
         existing = target_by_id.get(rebuilt.id)
-        if not existing:
-            additions.append(rebuilt)
-        elif is_legacy_generated_feed(existing):
-            replacements.append(rebuilt)
-        else:
+        legacy_site_matches = [
+            target
+            for target in target_sources
+            if is_legacy_generated_feed(target) and same_site_url(target.site_url, rebuilt.site_url)
+        ]
+        if existing and existing.source == rebuilt.source:
+            removals.extend(source.id for source in legacy_site_matches if source.id != existing.id)
+        elif existing and is_legacy_generated_feed(existing):
+            replacements[existing.id] = rebuilt
+        elif existing:
             conflicts.append(
                 f"{rebuilt.id}: target has a non-generated feed URL; refusing to overwrite {existing.feed_url}"
             )
+        elif len(legacy_site_matches) == 1:
+            replacements[legacy_site_matches[0].id] = rebuilt
+        elif len(legacy_site_matches) > 1:
+            conflicts.append(f"{rebuilt.id}: multiple legacy generated feeds share {rebuilt.site_url}")
+        else:
+            additions.append(rebuilt)
 
     return GeneratedSourceMigration(
         replacements=replacements,
         additions=additions,
+        removals=sorted(set(removals)),
         conflicts=conflicts,
         source_counts=dict(sorted(Counter(source.source for source in reference_sources).items())),
     )
@@ -73,8 +89,9 @@ def apply_generated_source_migration(target_store: FeedStore, migration: Generat
     if migration.conflicts:
         raise ValueError("Cannot apply generated-source migration with conflicts")
 
-    replacements = {source.id: source for source in migration.replacements}
-    sources = [replacements.get(source.id, source) for source in target_store.sources()]
+    removed_ids = set(migration.replacements) | set(migration.removals)
+    sources = [source for source in target_store.sources() if source.id not in removed_ids]
+    sources.extend(migration.replacements.values())
     sources.extend(migration.additions)
     target_store.set_sources(sources)
     target_store.save()
@@ -107,3 +124,12 @@ def is_legacy_generated_feed(source: Source) -> bool:
     return feed_url.startswith("file://") or "/feeds/" in feed_url and (
         "/bandcamp/" in feed_url or "/generated/" in feed_url
     )
+
+
+def same_site_url(left: str, right: str) -> bool:
+    return normalized_site_url(left) == normalized_site_url(right)
+
+
+def normalized_site_url(value: str) -> str:
+    parsed = urlsplit(value.strip())
+    return urlunsplit((parsed.scheme.lower(), parsed.netloc.lower(), parsed.path.rstrip("/"), "", ""))

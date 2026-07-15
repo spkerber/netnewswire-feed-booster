@@ -258,6 +258,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             print(f"{source_label}: {count}")
         print(f"Would replace legacy imported feeds: {len(migration.replacements)}")
         print(f"Would add missing generated feeds: {len(migration.additions)}")
+        print(f"Would remove duplicate legacy feeds: {len(migration.removals)}")
         print(f"Conflicts: {len(migration.conflicts)}")
         for conflict in migration.conflicts:
             print(f"CONFLICT\t{conflict}")
