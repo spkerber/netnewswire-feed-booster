@@ -88,7 +88,36 @@ PYTHONPATH=src python3 -m netnewswire_feed_booster \
 
 The import is local. It does not modify NetNewsWire or any upstream subscription.
 
-### Move An Existing Local Registry
+### Rebuild Generated Sources From A Private Reference
+
+For a fresh setup, do not copy the old source registry into the new profile. Use it only as a local, read-only reference to replace legacy Modal and `file://` URLs in the OPML import.
+
+```bash
+PYTHONPATH=src python3 -m netnewswire_feed_booster \
+  --data "data/sources.${RSS_PROFILE}.json" \
+  migrate-generated-sources /private/path/to/sources.old.json \
+  --profile "$RSS_PROFILE"
+```
+
+This is a dry run. It reports the old generated sources it recognizes, stale imported feeds it would replace, and conflicts it will refuse to overwrite. If it reports zero conflicts, write the new source metadata:
+
+```bash
+PYTHONPATH=src python3 -m netnewswire_feed_booster \
+  --data "data/sources.${RSS_PROFILE}.json" \
+  migrate-generated-sources /private/path/to/sources.old.json \
+  --profile "$RSS_PROFILE" --apply
+```
+
+Then regenerate the actual RSS files. These commands make public network requests, so review their output before exporting OPML or deploying a host:
+
+```bash
+PYTHONPATH=src python3 -m netnewswire_feed_booster \
+  refresh-bandcamp-local-feeds --profile "$RSS_PROFILE"
+PYTHONPATH=src python3 -m netnewswire_feed_booster \
+  refresh-generated-local-feeds --profile "$RSS_PROFILE"
+```
+
+### Reuse An Existing Local Registry Instead
 
 If you are rebuilding from another local checkout, copy the profile files directly instead of publishing or attaching them. In the new private checkout, initialize the profile once, then replace its empty files with your existing local copies:
 

@@ -11,6 +11,7 @@ from .bandcamp_sources import build_bandcamp_source_from_url
 from .subscription_history import SubscriptionHistoryStore, default_subscription_history_path
 from .feed_store import FeedStore, Source, default_private_sources_path, default_sources_path, normalize_url, slugify
 from .feed_validation import audit_sources, discover_feed_url
+from .generated_migration import apply_generated_source_migration, plan_generated_source_migration
 from .hosted_bandcamp import bandcamp_fetch_url, bandcamp_items_for_source, sources_with_hosted_bandcamp_feeds
 from .hosted_bandcamp import render_bandcamp_source_rss
 from .hydefm import DEFAULT_ARCHIVE_URL as HYDEFM_ARCHIVE_URL
@@ -48,6 +49,16 @@ def build_parser() -> argparse.ArgumentParser:
     import_parser = subparsers.add_parser("import-opml", help="Import sources from an OPML file")
     import_parser.add_argument("path", type=Path)
     import_parser.add_argument("--profile", default=DEFAULT_PROFILE)
+
+    migration_parser = subparsers.add_parser(
+        "migrate-generated-sources",
+        help="Rebuild generated-source metadata from an old private registry without copying it",
+    )
+    migration_parser.add_argument("reference", type=Path, help="Ignored old sources.<profile>.json file to read as migration reference")
+    migration_parser.add_argument("--profile", default=DEFAULT_PROFILE)
+    migration_parser.add_argument("--bandcamp-out-dir", type=Path, default=Path("exports/bandcamp"))
+    migration_parser.add_argument("--generated-out-dir", type=Path, default=Path("exports/generated"))
+    migration_parser.add_argument("--apply", action="store_true", help="Write the rebuilt generated-source metadata into --data")
 
     export_parser = subparsers.add_parser("export-opml", help="Export active sources to OPML")
     export_parser.add_argument("--profile", default=DEFAULT_PROFILE)
@@ -134,6 +145,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         help="Fan source ID to refresh without the fan item cap; can be passed multiple times",
     )
+
+    generated_local_parser = subparsers.add_parser(
+        "refresh-generated-local-feeds",
+        help="Regenerate saved NTS and HydeFM local RSS files",
+    )
+    generated_local_parser.add_argument("--profile", default=DEFAULT_PROFILE)
+    generated_local_parser.add_argument("--out-dir", type=Path, default=Path("exports/generated"))
 
     bandcamp_source_parser = subparsers.add_parser("subscribe-bandcamp-source", help="Add or reactivate a Bandcamp artist/label or fan source and generate its local RSS")
     bandcamp_source_parser.add_argument("url")
@@ -225,6 +243,31 @@ def main(argv: Optional[list[str]] = None) -> int:
             store.add_or_update(source)
         store.save()
         print(f"Imported {len(sources)} sources into {args.data}")
+        return 0
+
+    if args.command == "migrate-generated-sources":
+        migration = plan_generated_source_migration(
+            FeedStore(args.reference),
+            store,
+            profile=args.profile,
+            bandcamp_out_dir=args.bandcamp_out_dir,
+            generated_out_dir=args.generated_out_dir,
+        )
+        print(f"Generated sources found in reference: {sum(migration.source_counts.values())}")
+        for source_label, count in migration.source_counts.items():
+            print(f"{source_label}: {count}")
+        print(f"Would replace legacy imported feeds: {len(migration.replacements)}")
+        print(f"Would add missing generated feeds: {len(migration.additions)}")
+        print(f"Conflicts: {len(migration.conflicts)}")
+        for conflict in migration.conflicts:
+            print(f"CONFLICT\t{conflict}")
+        if migration.conflicts:
+            return 1
+        if not args.apply:
+            print("Dry run only. Re-run with --apply to write rebuilt generated-source metadata.")
+            return 0
+        apply_generated_source_migration(store, migration)
+        print(f"Rebuilt {migration.total} generated-source records in {args.data}")
         return 0
 
     if args.command == "export-opml":
@@ -435,6 +478,35 @@ def main(argv: Optional[list[str]] = None) -> int:
         store.save()
         print(f"Updated local Bandcamp feeds: {updated}")
         print(f"Failed local Bandcamp feeds: {failed}")
+        return 0
+
+    if args.command == "refresh-generated-local-feeds":
+        updated = 0
+        failed = 0
+        sources = store.sources()
+        for source in sources:
+            if source.status != "active" or args.profile not in source.profiles:
+                continue
+            try:
+                if source.source == "nts-local-generated":
+                    rss = render_nts_show_rss(source.site_url)
+                elif source.source == "radio-local-generated":
+                    rss = render_hydefm_archive_rss(source.site_url)
+                else:
+                    continue
+                out_path = args.out_dir / f"{source.id}.rss"
+                out_path.parent.mkdir(parents=True, exist_ok=True)
+                out_path.write_text(rss, encoding="utf-8")
+                source.feed_url = out_path.resolve().as_uri()
+                updated += 1
+                print(f"UPDATED\t{source.id}\t{source.feed_url}")
+            except Exception as error:
+                failed += 1
+                print(f"FAILED\t{source.id}\t{type(error).__name__}: {error}\t{source.site_url}")
+        store.set_sources(sources)
+        store.save()
+        print(f"Updated local generated feeds: {updated}")
+        print(f"Failed local generated feeds: {failed}")
         return 0
 
     if args.command == "subscribe-bandcamp-source":

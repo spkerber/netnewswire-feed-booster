@@ -444,6 +444,61 @@ class CliTests(unittest.TestCase):
         self.assertIn("error\thtml\tbroken-feed", rendered)
         self.assertIn("Audited 2 sources; failures: 1", rendered)
 
+    def test_refresh_generated_local_feeds_regenerates_nts_and_hydefm(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            data_path = Path(tmp_dir) / "sources.json"
+            out_dir = Path(tmp_dir) / "generated"
+            store = FeedStore(data_path)
+            store.add_or_update(
+                Source(
+                    id="nts-example",
+                    title="NTS: Example",
+                    feed_url="file:///old/nts-example.rss",
+                    site_url="https://www.nts.live/shows/example",
+                    kind="other",
+                    profiles=["trial"],
+                    groups=["NTS"],
+                    source="nts-local-generated",
+                )
+            )
+            store.add_or_update(
+                Source(
+                    id="radio-hydefm-archives",
+                    title="HydeFM Archives",
+                    feed_url="file:///old/radio-hydefm-archives.rss",
+                    site_url="https://hydefm.com/archives/",
+                    kind="other",
+                    profiles=["trial"],
+                    groups=["HydeFM"],
+                    source="radio-local-generated",
+                )
+            )
+            store.save()
+
+            with patch("netnewswire_feed_booster.cli.render_nts_show_rss", return_value="<rss>nts</rss>"):
+                with patch("netnewswire_feed_booster.cli.render_hydefm_archive_rss", return_value="<rss>hydefm</rss>"):
+                    with redirect_stdout(io.StringIO()):
+                        result = main(
+                            [
+                                "--data",
+                                str(data_path),
+                                "refresh-generated-local-feeds",
+                                "--profile",
+                                "trial",
+                                "--out-dir",
+                                str(out_dir),
+                            ]
+                        )
+
+            refreshed = FeedStore(data_path)
+            nts_rss = (out_dir / "nts-example.rss").read_text(encoding="utf-8")
+            hydefm_rss = (out_dir / "radio-hydefm-archives.rss").read_text(encoding="utf-8")
+
+        self.assertEqual(result, 0)
+        self.assertEqual(nts_rss, "<rss>nts</rss>")
+        self.assertEqual(hydefm_rss, "<rss>hydefm</rss>")
+        self.assertTrue(refreshed.source_by_id("nts-example").feed_url.endswith("/generated/nts-example.rss"))
+
 
 if __name__ == "__main__":
     unittest.main()
