@@ -37,6 +37,7 @@ python3 -m netnewswire_feed_booster subscribe-bandcamp-source https://artist.ban
 python3 -m netnewswire_feed_booster refresh-bandcamp-local-feeds --profile "$RSS_PROFILE"
 python3 -m netnewswire_feed_booster subscribe-nts-show https://www.nts.live/shows/example --profile "$RSS_PROFILE"
 python3 -m netnewswire_feed_booster subscribe-hydefm-archive --profile "$RSS_PROFILE"
+python3 -m netnewswire_feed_booster subscribe-mixcloud-profile https://www.mixcloud.com/example/ --profile "$RSS_PROFILE"
 ```
 
 After adding or removing a generated source, redeploy the hosted bridge before exporting hosted OPML:

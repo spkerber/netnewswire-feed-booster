@@ -173,7 +173,7 @@ def _generated_source(source_id: str):
         return None
 
     source = FeedStore(DATA_PATH).source_by_id(source_id)
-    if source is None or source.status != "active" or source.source not in {"nts-local-generated", "radio-local-generated"}:
+    if source is None or source.status != "active" or source.source not in {"nts-local-generated", "radio-local-generated", "mixcloud-local-generated"}:
         return None
     return source
 
@@ -184,7 +184,7 @@ def _active_refreshable_generated_sources():
     return [
         source
         for source in FeedStore(DATA_PATH).sources()
-        if source.source in {"nts-local-generated", "radio-local-generated"} and source.status == "active" and RSS_PROFILE in source.profiles
+        if source.source in {"nts-local-generated", "radio-local-generated", "mixcloud-local-generated"} and source.status == "active" and RSS_PROFILE in source.profiles
     ]
 
 
@@ -232,6 +232,16 @@ def _refresh_generated_source(source) -> str:
                 raise ValueError(f"HydeFM returned 304 without a cached feed: {source.id}")
             return rss
         rss = render_hydefm_archive_rss(source.site_url, fetcher=lambda _: content)
+    elif source.source == "mixcloud-local-generated":
+        from netnewswire_feed_booster.mixcloud import mixcloud_cloudcasts_url, render_mixcloud_profile_rss
+
+        content = _fetch_source_text(source.id, mixcloud_cloudcasts_url(source.site_url))
+        if content is None:
+            rss = _read_cached_or_seeded_generated_rss(source.id)
+            if rss is None:
+                raise ValueError(f"Mixcloud returned 304 without a cached feed: {source.id}")
+            return rss
+        rss = render_mixcloud_profile_rss(source.site_url, fetcher=lambda _: json.loads(content))
     else:
         raise ValueError(f"Generated source is not refreshable: {source.id}")
 
@@ -330,7 +340,7 @@ def web():
             raise HTTPException(status_code=404, detail="Unknown active generated source")
 
         rss = _read_cached_or_seeded_generated_rss(source_id)
-        if rss is None and source.source in {"nts-local-generated", "radio-local-generated"}:
+        if rss is None and source.source in {"nts-local-generated", "radio-local-generated", "mixcloud-local-generated"}:
             try:
                 rss = _refresh_generated_source(source)
             except Exception as error:

@@ -13,6 +13,7 @@ GENERATED_SOURCE_LABELS = {
     "bandcamp-local-generated",
     "nts-local-generated",
     "radio-local-generated",
+    "mixcloud-local-generated",
 }
 
 

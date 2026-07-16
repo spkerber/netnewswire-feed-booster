@@ -38,7 +38,7 @@ def sources_with_hosted_bandcamp_feeds(sources: Iterable[Source], base_url: str,
     for source in sources:
         if source.kind == "bandcamp":
             rewritten.append(replace(source, feed_url=hosted_bandcamp_feed_url(base_url, source.id, token=token)))
-        elif source.source in {"nts-local-generated", "radio-local-generated"}:
+        elif source.source in {"nts-local-generated", "radio-local-generated", "mixcloud-local-generated"}:
             rewritten.append(replace(source, feed_url=hosted_generated_feed_url(base_url, source.id, token=token)))
         else:
             rewritten.append(source)

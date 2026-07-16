@@ -17,6 +17,7 @@ from .hosted_bandcamp import render_bandcamp_source_rss
 from .hydefm import DEFAULT_ARCHIVE_URL as HYDEFM_ARCHIVE_URL
 from .hydefm import parse_hydefm_archive_markdown, render_hydefm_archive_rss, fetch_hydefm_archive_markdown
 from .nts import parse_nts_show_html, render_nts_show_rss
+from .mixcloud import mixcloud_source, render_mixcloud_profile_rss
 from .opml import parse_opml, write_opml
 from .http_client import fetch_text
 from .podcasts import podcast_source_from_url
@@ -139,6 +140,12 @@ def build_parser() -> argparse.ArgumentParser:
     hydefm_parser.add_argument("--profile", default=DEFAULT_PROFILE)
     hydefm_parser.add_argument("--group", default="HydeFM")
     hydefm_parser.add_argument("--out-dir", type=Path, default=Path("exports/generated"))
+
+    mixcloud_parser = subparsers.add_parser("subscribe-mixcloud-profile", help="Generate and subscribe to RSS from a public Mixcloud profile")
+    mixcloud_parser.add_argument("url")
+    mixcloud_parser.add_argument("--profile", default=DEFAULT_PROFILE)
+    mixcloud_parser.add_argument("--group", default="Mixcloud")
+    mixcloud_parser.add_argument("--out-dir", type=Path, default=Path("exports/generated"))
 
     bandcamp_local_parser = subparsers.add_parser("refresh-bandcamp-local-feeds", help="Generate local RSS files for all saved Bandcamp artist and fan sources")
     bandcamp_local_parser.add_argument("--profile", default=DEFAULT_PROFILE)
@@ -452,6 +459,19 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"Subscribed HydeFM archive {changed_id}: {source.feed_url}")
         return 0
 
+    if args.command == "subscribe-mixcloud-profile":
+        source = mixcloud_source(args.url, profile=args.profile, group=args.group)
+        rss = render_mixcloud_profile_rss(source.site_url)
+        out_path = args.out_dir / f"{source.id}.rss"
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(rss, encoding="utf-8")
+        source.feed_url = out_path.resolve().as_uri()
+        changed_id = store.add_or_update(source)
+        store.set_status(changed_id, "active")
+        store.save()
+        print(f"Subscribed Mixcloud profile {changed_id}: {source.feed_url}")
+        return 0
+
     if args.command == "refresh-bandcamp-local-feeds":
         updated = 0
         failed = 0
@@ -506,6 +526,8 @@ def main(argv: Optional[list[str]] = None) -> int:
                     rss = render_nts_show_rss(source.site_url)
                 elif source.source == "radio-local-generated":
                     rss = render_hydefm_archive_rss(source.site_url)
+                elif source.source == "mixcloud-local-generated":
+                    rss = render_mixcloud_profile_rss(source.site_url)
                 else:
                     continue
                 out_path = args.out_dir / f"{source.id}.rss"
