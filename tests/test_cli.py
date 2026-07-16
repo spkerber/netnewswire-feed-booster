@@ -21,6 +21,25 @@ EMPTY_NETNEWSWIRE_OPML = """<?xml version="1.0" encoding="UTF-8"?>
 
 
 class CliTests(unittest.TestCase):
+    def test_import_opml_uses_bulk_store_merge(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            data_path = Path(tmp_dir) / "sources.json"
+            opml_path = Path(tmp_dir) / "sources.opml"
+            write_opml(
+                opml_path,
+                [
+                    Source(id="first", title="First", feed_url="https://example.com/first.xml", profiles=["fresh"]),
+                    Source(id="second", title="Second", feed_url="https://example.com/second.xml", profiles=["fresh"]),
+                ],
+                title="Import test",
+            )
+
+            with patch.object(FeedStore, "add_or_update", side_effect=AssertionError("per-source import is too slow")):
+                with redirect_stdout(io.StringIO()):
+                    main(["--data", str(data_path), "import-opml", str(opml_path), "--profile", "fresh"])
+
+            self.assertEqual(len(FeedStore(data_path).active_sources("fresh")), 2)
+
     def test_profile_argument_selects_profile_specific_paths(self) -> None:
         with TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

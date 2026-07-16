@@ -176,6 +176,38 @@ class FeedStore:
         self.data["sources"] = [item.to_dict() for item in sorted(sources, key=lambda item: item.title.lower())]
         return changed_id
 
+    def add_or_update_many(self, incoming_sources: Iterable[Source]) -> int:
+        """Merge a collection of sources and sort once, for large OPML imports."""
+        sources = self.sources()
+        by_id = {source.id: source for source in sources}
+        by_feed_url = {source.feed_url: source for source in sources}
+        added_or_updated = 0
+
+        for source in incoming_sources:
+            source.groups = normalize_groups_for_source(source)
+            self._validate(source)
+            existing = by_id.get(source.id) or by_feed_url.get(source.feed_url)
+            if existing:
+                existing.title = source.title or existing.title
+                existing.feed_url = source.feed_url or existing.feed_url
+                existing.site_url = source.site_url or existing.site_url
+                existing.kind = source.kind or existing.kind
+                existing.profiles = sorted(set(existing.profiles + source.profiles))
+                existing.groups = normalize_groups_for_source(existing, extra_groups=source.groups)
+                existing.tags = sorted(set(existing.tags + source.tags))
+                existing.notes = source.notes or existing.notes
+                existing.source = existing.source if existing.source != "manual" else source.source
+                by_feed_url[existing.feed_url] = existing
+            else:
+                source.id = unique_id(source.id, by_id)
+                sources.append(source)
+                by_id[source.id] = source
+                by_feed_url[source.feed_url] = source
+            added_or_updated += 1
+
+        self.set_sources(sources)
+        return added_or_updated
+
     def set_status(self, source_id: str, status: str) -> Source:
         if status not in VALID_STATUSES:
             raise ValueError(f"Invalid status: {status}")

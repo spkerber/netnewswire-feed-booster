@@ -249,8 +249,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     if args.command == "import-opml":
         sources = parse_opml(args.path, profile=args.profile)
-        for source in sources:
-            store.add_or_update(source)
+        store.add_or_update_many(sources)
         store.save()
         print(f"Imported {len(sources)} sources into {args.data}")
         return 0
