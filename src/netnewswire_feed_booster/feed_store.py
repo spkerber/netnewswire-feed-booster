@@ -23,11 +23,11 @@ def repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
-def default_sources_path() -> Path:
+def default_sources_path(profile: str = "") -> Path:
     configured = os.environ.get("RSS_SOURCES_FILE")
     if configured:
         return Path(configured)
-    profile = os.environ.get("RSS_PROFILE", "")
+    profile = profile or os.environ.get("RSS_PROFILE", "")
     if profile:
         profile_path = repo_root() / "data" / f"sources.{profile}.json"
         if profile_path.exists():

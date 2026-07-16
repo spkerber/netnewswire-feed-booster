@@ -21,6 +21,32 @@ EMPTY_NETNEWSWIRE_OPML = """<?xml version="1.0" encoding="UTF-8"?>
 
 
 class CliTests(unittest.TestCase):
+    def test_profile_argument_selects_profile_specific_paths(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            data_path = root / "sources.fresh.json"
+            history_path = root / "subscription-history.fresh.json"
+
+            with (
+                patch("netnewswire_feed_booster.cli.default_sources_path", return_value=data_path) as default_data,
+                patch("netnewswire_feed_booster.cli.default_subscription_history_path", return_value=history_path) as default_history,
+                redirect_stdout(io.StringIO()),
+            ):
+                main(
+                    [
+                        "subscribe-substack",
+                        "oneusefulthing.substack.com",
+                        "--title",
+                        "One Useful Thing",
+                        "--profile",
+                        "fresh",
+                    ]
+                )
+
+            default_data.assert_called_once_with("fresh")
+            default_history.assert_called_once_with("fresh")
+            self.assertIsNotNone(FeedStore(data_path).source_by_id("one-useful-thing"))
+
     def test_list_redacts_feed_urls_unless_explicitly_requested(self) -> None:
         with TemporaryDirectory() as tmp_dir:
             data_path = Path(tmp_dir) / "sources.json"

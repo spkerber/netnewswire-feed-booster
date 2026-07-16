@@ -41,9 +41,9 @@ def build_parser() -> argparse.ArgumentParser:
         prog="netnewswire-feed-booster",
         description="Manage local RSS sources and export NetNewsWire-compatible OPML.",
     )
-    parser.add_argument("--data", type=Path, default=default_sources_path(), help="Path to sources.json")
+    parser.add_argument("--data", type=Path, default=None, help="Path to sources.json")
     parser.add_argument("--private-data", type=Path, default=default_private_sources_path(), help="Path to local gitignored private sources overlay")
-    parser.add_argument("--history", type=Path, default=default_subscription_history_path(), help="Path to subscription-history.json")
+    parser.add_argument("--history", type=Path, default=None, help="Path to subscription-history.json")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     import_parser = subparsers.add_parser("import-opml", help="Import sources from an OPML file")
@@ -238,6 +238,11 @@ def add_source_arguments(parser: argparse.ArgumentParser) -> None:
 def main(argv: Optional[list[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    profile = getattr(args, "profile", None) or os.environ.get("RSS_PROFILE", "")
+    if args.data is None:
+        args.data = default_sources_path(profile)
+    if args.history is None:
+        args.history = default_subscription_history_path(profile)
     store = FeedStore(args.data)
     private_store = FeedStore(args.private_data)
     history_store = SubscriptionHistoryStore(args.history)
