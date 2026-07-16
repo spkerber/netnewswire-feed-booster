@@ -35,4 +35,4 @@ Copy the deployed HTTPS endpoint into `RSS_FEED_BASE`, then export the hosted OP
 ./scripts/netnewswire_workflow.sh export
 ```
 
-The workflow loads only ignored private environment files, deploys the current source bundle, runs tests, exports hosted OPML, and validates XML. The token prevents casual enumeration; it is not account-grade authentication, so do not publish tokenized URLs.
+The workflow loads only ignored private environment files, deploys the current source bundle, runs tests, exports hosted OPML, and validates XML. Generated feeds are served from a seed/cache; normal reader requests do not force upstream scraping. Modal refreshes them every six hours, sequentially with a one-second pause, and sends saved `ETag`/`Last-Modified` validators when a source supports them. The token prevents casual enumeration; it is not account-grade authentication, so do not publish tokenized URLs.

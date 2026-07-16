@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hmac
+import json
 import os
 import time
 from pathlib import Path
@@ -20,6 +21,7 @@ GENERATED_SEED_DIR = Path("/root/seed/generated")
 CACHE_ROOT = Path("/cache")
 CACHE_DIR = CACHE_ROOT / "bandcamp"
 GENERATED_CACHE_DIR = CACHE_ROOT / "generated"
+VALIDATOR_DIR = CACHE_ROOT / "validators"
 FAN_MAX_ITEMS = 40
 FULL_FAN_SOURCE_IDS = {
     source_id.strip()
@@ -28,6 +30,7 @@ FULL_FAN_SOURCE_IDS = {
 }
 REFRESH_PAUSE_SECONDS = 1.0
 OPEN_FILES_CONFLICT = "open files preventing the operation"
+READER_CACHE_CONTROL = "private, max-age=3600, stale-if-error=21600"
 
 
 image = (
@@ -69,6 +72,42 @@ def _generated_seed_path(source_id: str) -> Path:
 
     source_id = validate_source_id(source_id)
     return GENERATED_SEED_DIR / f"{source_id}.rss"
+
+
+def _validator_path(source_id: str) -> Path:
+    from netnewswire_feed_booster.rss_safety import validate_source_id
+
+    source_id = validate_source_id(source_id)
+    return VALIDATOR_DIR / f"{source_id}.json"
+
+
+def _validator_headers(source_id: str) -> dict[str, str]:
+    try:
+        stored = json.loads(_validator_path(source_id).read_text(encoding="utf-8"))
+    except (FileNotFoundError, ValueError, json.JSONDecodeError):
+        return {}
+    if not isinstance(stored, dict):
+        return {}
+    headers: dict[str, str] = {}
+    if isinstance(stored.get("etag"), str) and stored["etag"]:
+        headers["If-None-Match"] = stored["etag"]
+    if isinstance(stored.get("last_modified"), str) and stored["last_modified"]:
+        headers["If-Modified-Since"] = stored["last_modified"]
+    return headers
+
+
+def _fetch_source_text(source_id: str, url: str) -> Optional[str]:
+    from netnewswire_feed_booster.http_client import fetch_text_response
+
+    response = fetch_text_response(url, request_headers=_validator_headers(source_id))
+    if response.not_modified:
+        return None
+    VALIDATOR_DIR.mkdir(parents=True, exist_ok=True)
+    _validator_path(source_id).write_text(
+        json.dumps({"etag": response.etag, "last_modified": response.last_modified}),
+        encoding="utf-8",
+    )
+    return response.text
 
 
 def _configured_feed_token() -> str:
@@ -150,10 +189,18 @@ def _active_refreshable_generated_sources():
 
 
 def _refresh_source(source) -> str:
-    from netnewswire_feed_booster.hosted_bandcamp import render_bandcamp_source_rss
+    from netnewswire_feed_booster.hosted_bandcamp import bandcamp_fetch_url, render_bandcamp_source_rss
+
+    html = _fetch_source_text(source.id, bandcamp_fetch_url(source))
+    if html is None:
+        rss = _read_cached_or_seeded_rss(source.id)
+        if rss is None:
+            raise ValueError(f"Bandcamp returned 304 without a cached feed: {source.id}")
+        return rss
 
     rss = render_bandcamp_source_rss(
         source,
+        fetcher=lambda _: html,
         fan_max_items=FAN_MAX_ITEMS,
         full_fan_source_ids=FULL_FAN_SOURCE_IDS,
     )
@@ -168,11 +215,23 @@ def _refresh_generated_source(source) -> str:
     if source.source == "nts-local-generated":
         from netnewswire_feed_booster.nts import render_nts_show_rss
 
-        rss = render_nts_show_rss(source.site_url)
+        content = _fetch_source_text(source.id, source.site_url)
+        if content is None:
+            rss = _read_cached_or_seeded_generated_rss(source.id)
+            if rss is None:
+                raise ValueError(f"NTS returned 304 without a cached feed: {source.id}")
+            return rss
+        rss = render_nts_show_rss(source.site_url, fetcher=lambda _: content)
     elif source.source == "radio-local-generated" and "hydefm.com" in source.site_url:
-        from netnewswire_feed_booster.hydefm import render_hydefm_archive_rss
+        from netnewswire_feed_booster.hydefm import hydefm_text_mirror_url, render_hydefm_archive_rss
 
-        rss = render_hydefm_archive_rss(source.site_url)
+        content = _fetch_source_text(source.id, hydefm_text_mirror_url(source.site_url))
+        if content is None:
+            rss = _read_cached_or_seeded_generated_rss(source.id)
+            if rss is None:
+                raise ValueError(f"HydeFM returned 304 without a cached feed: {source.id}")
+            return rss
+        rss = render_hydefm_archive_rss(source.site_url, fetcher=lambda _: content)
     else:
         raise ValueError(f"Generated source is not refreshable: {source.id}")
 
@@ -244,7 +303,7 @@ def web():
         raise HTTPException(status_code=404, detail="Tokenized feed URL required")
 
     @web_app.get("/feeds/{feed_token}/bandcamp/{source_id}.rss")
-    def bandcamp_feed(feed_token: str, source_id: str, refresh: bool = False):
+    def bandcamp_feed(feed_token: str, source_id: str):
         if not _token_is_valid(feed_token):
             raise HTTPException(status_code=404, detail="Unknown feed")
 
@@ -252,25 +311,17 @@ def web():
         if source is None:
             raise HTTPException(status_code=404, detail="Unknown active Bandcamp source")
 
-        if refresh:
+        rss = _read_cached_or_seeded_rss(source_id)
+        if rss is None:
             try:
                 rss = _refresh_source(source)
             except Exception as error:
-                rss = _read_cached_or_seeded_rss(source_id)
-                if rss is None:
-                    raise HTTPException(status_code=502, detail="Bandcamp refresh failed and no cached feed is available") from error
-        else:
-            rss = _read_cached_or_seeded_rss(source_id)
-            if rss is None:
-                try:
-                    rss = _refresh_source(source)
-                except Exception as error:
-                    raise HTTPException(status_code=502, detail="Bandcamp refresh failed and no cached feed is available") from error
+                raise HTTPException(status_code=502, detail="Bandcamp refresh failed and no cached feed is available") from error
 
-        return Response(content=rss, media_type="application/rss+xml; charset=utf-8")
+        return Response(content=rss, media_type="application/rss+xml; charset=utf-8", headers={"Cache-Control": READER_CACHE_CONTROL})
 
     @web_app.get("/feeds/{feed_token}/generated/{source_id}.rss")
-    def generated_feed(feed_token: str, source_id: str, refresh: bool = False):
+    def generated_feed(feed_token: str, source_id: str):
         if not _token_is_valid(feed_token):
             raise HTTPException(status_code=404, detail="Unknown feed")
 
@@ -278,24 +329,16 @@ def web():
         if source is None:
             raise HTTPException(status_code=404, detail="Unknown active generated source")
 
-        if refresh and source.source in {"nts-local-generated", "radio-local-generated"}:
+        rss = _read_cached_or_seeded_generated_rss(source_id)
+        if rss is None and source.source in {"nts-local-generated", "radio-local-generated"}:
             try:
                 rss = _refresh_generated_source(source)
             except Exception as error:
-                rss = _read_cached_or_seeded_generated_rss(source_id)
-                if rss is None:
-                    raise HTTPException(status_code=502, detail="Generated refresh failed and no cached feed is available") from error
-        else:
-            rss = _read_cached_or_seeded_generated_rss(source_id)
-            if rss is None and source.source in {"nts-local-generated", "radio-local-generated"}:
-                try:
-                    rss = _refresh_generated_source(source)
-                except Exception as error:
-                    raise HTTPException(status_code=502, detail="Generated refresh failed and no cached feed is available") from error
-            if rss is None:
-                raise HTTPException(status_code=502, detail="Generated feed seed is unavailable")
+                raise HTTPException(status_code=502, detail="Generated refresh failed and no cached feed is available") from error
+        if rss is None:
+            raise HTTPException(status_code=502, detail="Generated feed seed is unavailable")
 
-        return Response(content=rss, media_type="application/rss+xml; charset=utf-8")
+        return Response(content=rss, media_type="application/rss+xml; charset=utf-8", headers={"Cache-Control": READER_CACHE_CONTROL})
 
     @web_app.get("/")
     def index():

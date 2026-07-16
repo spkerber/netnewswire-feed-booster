@@ -1,10 +1,28 @@
 import unittest
+from email.message import Message
+from urllib.error import HTTPError
 
 from netnewswire_feed_booster.rss_safety import ensure_rss_channel, is_safe_source_id, parse_internet_date, safe_https_url, validate_source_id
-from netnewswire_feed_booster.http_client import fetch_text
+from netnewswire_feed_booster.http_client import fetch_text, fetch_text_response
 
 
 class RssSafetyTests(unittest.TestCase):
+    def test_fetch_text_response_preserves_conditional_request_and_handles_304(self) -> None:
+        headers = Message()
+        headers["ETag"] = '"current"'
+        error = HTTPError("https://example.com/feed.xml", 304, "Not Modified", headers, None)
+
+        with unittest.mock.patch("urllib.request.urlopen", side_effect=error) as urlopen:
+            response = fetch_text_response(
+                "https://example.com/feed.xml",
+                request_headers={"If-None-Match": '"previous"'},
+            )
+
+        self.assertTrue(response.not_modified)
+        self.assertIsNone(response.text)
+        self.assertEqual(response.etag, '"current"')
+        self.assertEqual(urlopen.call_args.args[0].get_header("If-none-match"), '"previous"')
+
     def test_validate_source_id_allows_slug_ids_only(self) -> None:
         self.assertTrue(is_safe_source_id("nts-dark-entries-w-josh-cheon"))
         self.assertEqual(validate_source_id("radio-hydefm-archives"), "radio-hydefm-archives")
