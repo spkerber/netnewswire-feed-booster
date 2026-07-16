@@ -23,10 +23,15 @@ Tokenless routes return `404`. This makes stale imports visible in logs rather t
 cp examples/private.env.example data/private.env
 ```
 
-Set `RSS_PROFILE`, `RSS_SOURCES_FILE`, `RSS_HISTORY_FILE`, `RSS_FEED_TOKEN`, and `RSS_FEED_BASE`. The `MODAL_*` values are only for the Modal deployment path; other hosts should use equivalent provider configuration while preserving `RSS_FEED_BASE` and `RSS_FEED_TOKEN`.
+Set `RSS_PROFILE`, `RSS_SOURCES_FILE`, `RSS_HISTORY_FILE`, `RSS_FEED_TOKEN`, and unique `MODAL_*` names. Leave `RSS_FEED_BASE` as a placeholder until Modal deploy prints the HTTPS endpoint. The `MODAL_*` values are only for the Modal deployment path; other hosts should use equivalent provider configuration while preserving `RSS_FEED_BASE` and `RSS_FEED_TOKEN`.
 
 ```bash
 ./scripts/netnewswire_workflow.sh deploy-modal
+```
+
+Copy the deployed HTTPS endpoint into `RSS_FEED_BASE`, then export the hosted OPML:
+
+```bash
 ./scripts/netnewswire_workflow.sh export
 ```
 

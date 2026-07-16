@@ -37,7 +37,7 @@ OUT_FILE="${NETNEWSWIRE_OPML_OUT:-exports/${RSS_PROFILE}-netnewswire-hosted.opml
 MODAL_BIN="${MODAL_BIN:-.venv-modal/bin/modal}"
 NETNEWSWIRE_OPML="${NETNEWSWIRE_OPML:-${HOME}/Library/Containers/com.ranchero.NetNewsWire-Evergreen/Data/Library/Application Support/NetNewsWire/Accounts/2_iCloud/Subscriptions.opml}"
 
-load_token() {
+require_feed_token() {
   if [[ ! -f "${PRIVATE_ENV_FILE}" ]]; then
     echo "Missing ${PRIVATE_ENV_FILE}. Expected RSS_FEED_TOKEN=... for hosted generated feed URLs." >&2
     exit 1
@@ -46,14 +46,18 @@ load_token() {
     echo "${PRIVATE_ENV_FILE} does not define RSS_FEED_TOKEN." >&2
     exit 1
   fi
+}
+
+require_feed_base() {
+  require_feed_token
   if [[ -z "${RSS_FEED_BASE:-}" ]]; then
-    echo "${PRIVATE_ENV_FILE} or the environment must define RSS_FEED_BASE." >&2
+    echo "${PRIVATE_ENV_FILE} or the environment must define RSS_FEED_BASE after Modal deploy prints the HTTPS endpoint." >&2
     exit 1
   fi
 }
 
 deploy_modal() {
-  load_token
+  require_feed_token
   if [[ ! -x "${MODAL_BIN}" ]]; then
     echo "Missing ${MODAL_BIN}. Create .venv-modal and install .[modal] before deploying." >&2
     exit 1
@@ -64,7 +68,7 @@ deploy_modal() {
 }
 
 export_opml() {
-  load_token
+  require_feed_base
   PYTHONPATH=src python3 -m unittest discover -s tests
   PYTHONPATH=src python3 -m netnewswire_feed_booster \
     --data "${RSS_SOURCES_FILE}" \
