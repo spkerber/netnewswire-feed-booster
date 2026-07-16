@@ -62,7 +62,7 @@ def plan_generated_source_migration(
             if is_legacy_generated_feed(target) and same_site_url(target.site_url, rebuilt.site_url)
         ]
         if existing and existing.source == rebuilt.source:
-            if existing != rebuilt:
+            if not has_canonical_generated_metadata(existing, rebuilt):
                 replacements[existing.id] = rebuilt
             removals.extend(source.id for source in legacy_site_matches if source.id != existing.id)
         elif existing and is_legacy_generated_feed(existing):
@@ -130,6 +130,16 @@ def is_legacy_generated_feed(source: Source) -> bool:
 
 def same_site_url(left: str, right: str) -> bool:
     return normalized_site_url(left) == normalized_site_url(right)
+
+
+def has_canonical_generated_metadata(existing: Source, rebuilt: Source) -> bool:
+    """Compare generated-feed identity without treating review timestamps as drift."""
+    existing_metadata = existing.to_dict()
+    rebuilt_metadata = rebuilt.to_dict()
+    for field in ("added_at", "last_reviewed_at"):
+        existing_metadata.pop(field, None)
+        rebuilt_metadata.pop(field, None)
+    return existing_metadata == rebuilt_metadata
 
 
 def normalized_site_url(value: str) -> str:

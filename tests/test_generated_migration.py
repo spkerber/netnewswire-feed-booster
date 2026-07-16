@@ -54,6 +54,49 @@ class GeneratedSourceMigrationTests(unittest.TestCase):
         self.assertEqual(rebuilt.kind, "bandcamp")
         self.assertTrue(rebuilt.feed_url.endswith("/exports/bandcamp/bandcamp-example.rss"))
 
+    def test_keeps_canonical_generated_source_when_only_review_dates_differ(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            reference = FeedStore(root / "sources.old.json")
+            reference.add_or_update(
+                Source(
+                    id="bandcamp-example",
+                    title="Bandcamp: Example",
+                    feed_url="file:///old/bandcamp-example.rss",
+                    site_url="https://example.bandcamp.com/",
+                    kind="bandcamp",
+                    profiles=["old"],
+                    source="bandcamp-local-generated",
+                )
+            )
+            reference.save()
+
+            target = FeedStore(root / "sources.trial.json")
+            target.add_or_update(
+                Source(
+                    id="bandcamp-example",
+                    title="Bandcamp: Example",
+                    feed_url=(root / "exports/bandcamp/bandcamp-example.rss").resolve().as_uri(),
+                    site_url="https://example.bandcamp.com/",
+                    kind="bandcamp",
+                    profiles=["trial"],
+                    source="bandcamp-local-generated",
+                    added_at="2020-01-01",
+                    last_reviewed_at="2025-01-01",
+                )
+            )
+            target.save()
+
+            migration = plan_generated_source_migration(
+                reference,
+                target,
+                profile="trial",
+                bandcamp_out_dir=root / "exports/bandcamp",
+                generated_out_dir=root / "exports/generated",
+            )
+
+        self.assertEqual(migration.replacements, {})
+
     def test_replaces_legacy_hosted_feed_with_fresh_local_metadata(self) -> None:
         with TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
