@@ -10,6 +10,50 @@ from netnewswire_feed_booster.generated_migration import (
 
 
 class GeneratedSourceMigrationTests(unittest.TestCase):
+    def test_replaces_existing_generated_source_when_opml_import_overwrote_its_metadata(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            reference = FeedStore(root / "sources.old.json")
+            reference.add_or_update(
+                Source(
+                    id="bandcamp-example",
+                    title="Bandcamp: Example",
+                    feed_url="file:///old/bandcamp-example.rss",
+                    site_url="https://example.bandcamp.com/",
+                    kind="bandcamp",
+                    profiles=["old"],
+                    source="bandcamp-local-generated",
+                )
+            )
+            reference.save()
+
+            target = FeedStore(root / "sources.trial.json")
+            target.add_or_update(
+                Source(
+                    id="bandcamp-example",
+                    title="Bandcamp: Example",
+                    feed_url="https://old-host.example/feeds/old-token/bandcamp/bandcamp-example.rss",
+                    site_url="https://example.bandcamp.com/",
+                    kind="website",
+                    profiles=["trial"],
+                    source="bandcamp-local-generated",
+                )
+            )
+            target.save()
+
+            migration = plan_generated_source_migration(
+                reference,
+                target,
+                profile="trial",
+                bandcamp_out_dir=root / "exports/bandcamp",
+                generated_out_dir=root / "exports/generated",
+            )
+
+        self.assertIn("bandcamp-example", migration.replacements)
+        rebuilt = migration.replacements["bandcamp-example"]
+        self.assertEqual(rebuilt.kind, "bandcamp")
+        self.assertTrue(rebuilt.feed_url.endswith("/exports/bandcamp/bandcamp-example.rss"))
+
     def test_replaces_legacy_hosted_feed_with_fresh_local_metadata(self) -> None:
         with TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

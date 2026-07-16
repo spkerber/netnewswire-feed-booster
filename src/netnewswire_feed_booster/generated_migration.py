@@ -62,6 +62,8 @@ def plan_generated_source_migration(
             if is_legacy_generated_feed(target) and same_site_url(target.site_url, rebuilt.site_url)
         ]
         if existing and existing.source == rebuilt.source:
+            if existing != rebuilt:
+                replacements[existing.id] = rebuilt
             removals.extend(source.id for source in legacy_site_matches if source.id != existing.id)
         elif existing and is_legacy_generated_feed(existing):
             replacements[existing.id] = rebuilt
