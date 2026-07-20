@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import os
+from collections import Counter
 from pathlib import Path
 from typing import Optional
 from .bandcamp import (
@@ -12,12 +13,19 @@ from .subscription_history import SubscriptionHistoryStore, default_subscription
 from .feed_store import FeedStore, Source, default_private_sources_path, default_sources_path, normalize_url, slugify
 from .feed_validation import audit_sources, discover_feed_url
 from .generated_migration import apply_generated_source_migration, plan_generated_source_migration
+from .generated_adapters import BANDCAMP_ADAPTER, HYDEFM_ADAPTER, NTS_ADAPTER, adapter_for_source
+from .bridge_policy import (
+    DEFAULT_MAX_REFRESH_SOURCES_PER_RUN,
+    DEFAULT_REFRESH_INTERVAL_SECONDS,
+    DEFAULT_REFRESH_SCHEDULE_HOURS,
+    refresh_route_plan,
+)
 from .hosted_bandcamp import bandcamp_fetch_url, bandcamp_items_for_source, sources_with_hosted_bandcamp_feeds
 from .hosted_bandcamp import render_bandcamp_source_rss
 from .hydefm import DEFAULT_ARCHIVE_URL as HYDEFM_ARCHIVE_URL
-from .hydefm import parse_hydefm_archive_markdown, render_hydefm_archive_rss, fetch_hydefm_archive_markdown
-from .nts import parse_nts_show_html, render_nts_show_rss
-from .mixcloud import mixcloud_source, render_mixcloud_profile_rss
+from .hydefm import parse_hydefm_archive_markdown
+from .nts import parse_nts_show_html
+from .mixcloud import mixcloud_source
 from .opml import parse_opml, write_opml
 from .http_client import fetch_text
 from .podcasts import podcast_source_from_url
@@ -29,6 +37,7 @@ from .source_collections import (
     netnewswire_drift_report,
     print_drift_report,
     resolve_source_identifier,
+    display_feed_url,
 )
 from .substack import parse_substack_library_html, parse_substack_profile_html
 from .youtube import parse_youtube_channel_html, parse_youtube_subscriptions_file
@@ -151,6 +160,7 @@ def build_parser() -> argparse.ArgumentParser:
     bandcamp_local_parser.add_argument("--profile", default=DEFAULT_PROFILE)
     bandcamp_local_parser.add_argument("--out-dir", type=Path, default=Path("exports/bandcamp"))
     bandcamp_local_parser.add_argument("--fan-max-items", type=int, default=40, help="Maximum items to fetch for followed fan collection feeds")
+    bandcamp_local_parser.add_argument("--max-items", type=int, default=50, help="Maximum RSS items retained for any Bandcamp source")
     bandcamp_local_parser.add_argument(
         "--full-fan-source-id",
         action="append",
@@ -172,6 +182,7 @@ def build_parser() -> argparse.ArgumentParser:
     bandcamp_source_parser.add_argument("--source-type", choices=["auto", "artist", "fan"], default="auto")
     bandcamp_source_parser.add_argument("--out-dir", type=Path, default=Path("exports/bandcamp"))
     bandcamp_source_parser.add_argument("--fan-max-items", type=int, default=40)
+    bandcamp_source_parser.add_argument("--max-items", type=int, default=50, help="Maximum RSS items retained for this source")
     bandcamp_source_parser.add_argument("--no-refresh", action="store_true", help="Only update registry metadata; do not fetch Bandcamp or write local RSS")
 
     podcast_parser = subparsers.add_parser("subscribe-podcast", help="Subscribe to a podcast from an RSS URL or Apple Podcasts URL")
@@ -196,9 +207,11 @@ def build_parser() -> argparse.ArgumentParser:
     history_parser.add_argument("--status", default=None)
     history_parser.add_argument("--profile", default=None)
     history_parser.add_argument("--kind", default=None)
+    history_parser.add_argument("--show-sensitive", action="store_true")
 
     unfollow_parser = subparsers.add_parser("unfollow-checklist", help="List upstream unfollows implied by subscription-history entries")
     unfollow_parser.add_argument("--profile", default=DEFAULT_PROFILE)
+    unfollow_parser.add_argument("--show-sensitive", action="store_true")
 
     history_status_parser = subparsers.add_parser("set-history-status", help="Set a subscription-history entry status")
     history_status_parser.add_argument("entry_id")
@@ -213,11 +226,13 @@ def build_parser() -> argparse.ArgumentParser:
     reconcile_parser.add_argument("--profile", default=DEFAULT_PROFILE)
     reconcile_parser.add_argument("--apply", action="store_true", help="Mark missing active repo sources as unsubscribed")
     reconcile_parser.add_argument("--reason", default="Missing from latest NetNewsWire export")
+    reconcile_parser.add_argument("--show-sensitive", action="store_true")
 
     verify_nnw_parser = subparsers.add_parser("verify-netnewswire", help="Verify a live NetNewsWire OPML matches the hosted repo export")
     verify_nnw_parser.add_argument("path", type=Path, help="Path to NetNewsWire's active Subscriptions.opml")
     verify_nnw_parser.add_argument("--expected", type=Path, required=True, help="Path to the expected hosted OPML export")
     verify_nnw_parser.add_argument("--profile", default=DEFAULT_PROFILE)
+    verify_nnw_parser.add_argument("--show-sensitive", action="store_true")
 
     discover_feed_parser = subparsers.add_parser("discover-feed", help="Discover a page's RSS, Atom, or JSON Feed URL from alternate links")
     discover_feed_parser.add_argument("url")
@@ -227,6 +242,28 @@ def build_parser() -> argparse.ArgumentParser:
     audit_parser.add_argument("--status", default="active")
     audit_parser.add_argument("--kind", default=None)
     audit_parser.add_argument("--limit", type=int, default=0, help="Limit sources audited; useful for quick spot checks")
+    audit_parser.add_argument("--show-sensitive", action="store_true")
+
+    refresh_plan_parser = subparsers.add_parser(
+        "refresh-plan",
+        help="Show whether generated-source volume fits the hosted refresh settings",
+    )
+    refresh_plan_parser.add_argument("--profile", default=DEFAULT_PROFILE)
+    refresh_plan_parser.add_argument(
+        "--refresh-interval-hours",
+        type=int,
+        default=max(1, int(os.environ.get("RSS_REFRESH_INTERVAL_SECONDS", str(DEFAULT_REFRESH_INTERVAL_SECONDS))) // 3600),
+    )
+    refresh_plan_parser.add_argument(
+        "--schedule-hours",
+        type=int,
+        default=int(os.environ.get("RSS_REFRESH_SCHEDULE_HOURS", str(DEFAULT_REFRESH_SCHEDULE_HOURS))),
+    )
+    refresh_plan_parser.add_argument(
+        "--max-sources-per-run",
+        type=int,
+        default=int(os.environ.get("RSS_MAX_REFRESH_SOURCES_PER_RUN", str(DEFAULT_MAX_REFRESH_SOURCES_PER_RUN))),
+    )
 
     return parser
 
@@ -305,7 +342,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         sources = filtered_sources_with_private(store, private_store, profile=args.profile, status=args.status, kind=args.kind)
         for source in sources:
             groups = ", ".join(source.groups) if source.groups else "-"
-            feed_url = source.feed_url if args.show_sensitive else "[redacted; use --show-sensitive]"
+            feed_url = display_feed_url(source, args.show_sensitive)
             print(f"{source.id}\t{source.status}\t{source.kind}\t{groups}\t{source.title}\t{feed_url}")
         print(f"{len(sources)} sources")
         return 0
@@ -412,12 +449,25 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 0
 
     if args.command == "subscribe-nts-show":
-        html = fetch_text(args.url)
+        candidate = Source(
+            id="nts-source",
+            title="NTS",
+            feed_url="generated",
+            site_url=args.url.rstrip("/"),
+            kind="other",
+            source="nts-local-generated",
+        )
+        NTS_ADAPTER.validate(candidate)
+        html = fetch_text(
+            NTS_ADAPTER.upstream_url(candidate),
+            allowed_hosts=NTS_ADAPTER.allowed_hosts,
+            allowed_suffixes=NTS_ADAPTER.allowed_suffixes,
+        )
         title, _, _ = parse_nts_show_html(html, args.url)
         source_id = slugify(f"NTS {title}")
         out_path = args.out_dir / f"{source_id}.rss"
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(render_nts_show_rss(args.url, fetcher=lambda _: html), encoding="utf-8")
+        out_path.write_text(NTS_ADAPTER.render(candidate, html), encoding="utf-8")
         source = Source(
             id=source_id,
             title=f"NTS: {title}",
@@ -436,12 +486,25 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 0
 
     if args.command == "subscribe-hydefm-archive":
-        markdown = fetch_hydefm_archive_markdown(args.url)
-        title, _, _ = parse_hydefm_archive_markdown(markdown, args.url)
+        candidate = Source(
+            id="radio-hydefm-archives",
+            title="HydeFM Archives",
+            feed_url="generated",
+            site_url=args.url.rstrip("/") + "/",
+            kind="other",
+            source="radio-local-generated",
+        )
+        HYDEFM_ADAPTER.validate(candidate)
+        markdown = fetch_text(
+            HYDEFM_ADAPTER.upstream_url(candidate),
+            allowed_hosts=HYDEFM_ADAPTER.allowed_hosts,
+            allowed_suffixes=HYDEFM_ADAPTER.allowed_suffixes,
+        )
+        title, _, _ = parse_hydefm_archive_markdown(markdown, candidate.site_url)
         source_id = slugify(f"Radio {title}")
         out_path = args.out_dir / f"{source_id}.rss"
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(render_hydefm_archive_rss(args.url, fetcher=lambda _: markdown), encoding="utf-8")
+        out_path.write_text(HYDEFM_ADAPTER.render(candidate, markdown), encoding="utf-8")
         source = Source(
             id=source_id,
             title=title,
@@ -461,7 +524,16 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     if args.command == "subscribe-mixcloud-profile":
         source = mixcloud_source(args.url, profile=args.profile, group=args.group)
-        rss = render_mixcloud_profile_rss(source.site_url)
+        adapter = adapter_for_source(source)
+        if adapter is None:
+            raise ValueError(f"Unsupported generated source: {source.site_url}")
+        adapter.validate(source)
+        content = fetch_text(
+            adapter.upstream_url(source),
+            allowed_hosts=adapter.allowed_hosts,
+            allowed_suffixes=adapter.allowed_suffixes,
+        )
+        rss = adapter.render(source, content)
         out_path = args.out_dir / f"{source.id}.rss"
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(rss, encoding="utf-8")
@@ -490,8 +562,18 @@ def main(argv: Optional[list[str]] = None) -> int:
                 continue
 
             try:
-                html = fetch_text(bandcamp_fetch_url(source))
-                items = bandcamp_items_for_source(source, html, fan_max_items=args.fan_max_items, full_fan_source_ids=full_fan_source_ids)
+                html = fetch_text(
+                    bandcamp_fetch_url(source),
+                    allowed_hosts=BANDCAMP_ADAPTER.allowed_hosts,
+                    allowed_suffixes=BANDCAMP_ADAPTER.allowed_suffixes,
+                )
+                items = bandcamp_items_for_source(
+                    source,
+                    html,
+                    fan_max_items=args.fan_max_items,
+                    full_fan_source_ids=full_fan_source_ids,
+                    max_items=args.max_items,
+                )
                 if not items:
                     failed += 1
                     print(f"FAILED\t{source.id}\tNo items found\t{source.site_url}")
@@ -522,14 +604,16 @@ def main(argv: Optional[list[str]] = None) -> int:
             if source.status != "active" or args.profile not in source.profiles:
                 continue
             try:
-                if source.source == "nts-local-generated":
-                    rss = render_nts_show_rss(source.site_url)
-                elif source.source == "radio-local-generated":
-                    rss = render_hydefm_archive_rss(source.site_url)
-                elif source.source == "mixcloud-local-generated":
-                    rss = render_mixcloud_profile_rss(source.site_url)
-                else:
+                adapter = adapter_for_source(source)
+                if adapter is None or adapter.hosted_route != "generated":
                     continue
+                adapter.validate(source)
+                content = fetch_text(
+                    adapter.upstream_url(source),
+                    allowed_hosts=adapter.allowed_hosts,
+                    allowed_suffixes=adapter.allowed_suffixes,
+                )
+                rss = adapter.render(source, content)
                 out_path = args.out_dir / f"{source.id}.rss"
                 out_path.parent.mkdir(parents=True, exist_ok=True)
                 out_path.write_text(rss, encoding="utf-8")
@@ -557,8 +641,14 @@ def main(argv: Optional[list[str]] = None) -> int:
         if not args.no_refresh:
             rss = render_bandcamp_source_rss(
                 source,
+                fetcher=lambda url: fetch_text(
+                    url,
+                    allowed_hosts=BANDCAMP_ADAPTER.allowed_hosts,
+                    allowed_suffixes=BANDCAMP_ADAPTER.allowed_suffixes,
+                ),
                 fan_max_items=args.fan_max_items,
                 full_fan_source_ids=set(),
+                max_items=args.max_items,
             )
             out_path = args.out_dir / f"{source.id}.rss"
             out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -605,19 +695,22 @@ def main(argv: Optional[list[str]] = None) -> int:
     if args.command == "list-history":
         entries = history_store.filtered(status=args.status, profile=args.profile, source_kind=args.kind)
         for entry in entries:
-            print(
-                f"{entry.id}\t{entry.status}\t{entry.source_kind}\t"
-                f"{entry.profile}\t{entry.source_title}\t{entry.external_url or entry.feed_url}"
-            )
+            location = entry.external_url or entry.feed_url
+            if not args.show_sensitive:
+                location = "[redacted; use --show-sensitive]"
+            print(f"{entry.id}\t{entry.status}\t{entry.source_kind}\t{entry.profile}\t{entry.source_title}\t{location}")
         print(f"{len(entries)} subscription-history entries")
         return 0
 
     if args.command == "unfollow-checklist":
         entries = history_store.external_unfollow_candidates(profile=args.profile)
         for entry in entries:
+            location = entry.external_url or entry.feed_url
+            if not args.show_sensitive:
+                location = "[redacted; use --show-sensitive]"
             print(
                 f"{entry.id}\t{entry.source_kind}\t{entry.source_title}\t"
-                f"{entry.external_url or entry.feed_url}\t{entry.status}"
+                f"{location}\t{entry.status}"
             )
         print(f"{len(entries)} upstream unfollows")
         return 0
@@ -645,11 +738,11 @@ def main(argv: Optional[list[str]] = None) -> int:
 
         print(f"Missing active repo sources from NetNewsWire: {len(missing_from_netnewswire)}")
         for source in missing_from_netnewswire:
-            print(f"MISSING\t{source.id}\t{source.kind}\t{source.title}\t{source.feed_url}")
+            print(f"MISSING\t{source.id}\t{source.kind}\t{source.title}\t{display_feed_url(source, args.show_sensitive)}")
 
         print(f"NetNewsWire sources not in repo: {len(extra_in_netnewswire)}")
         for source in extra_in_netnewswire:
-            print(f"EXTRA\t{source.kind}\t{source.title}\t{source.feed_url}")
+            print(f"EXTRA\t{source.kind}\t{source.title}\t{display_feed_url(source, args.show_sensitive)}")
 
         if args.apply:
             for source in missing_from_netnewswire:
@@ -670,7 +763,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             expected_sources,
             store.filtered(profile=args.profile, status="unsubscribed"),
         )
-        print_drift_report(drift)
+        print_drift_report(drift, show_sensitive=args.show_sensitive)
         return 1 if drift_has_failures(drift) else 0
 
     if args.command == "discover-feed":
@@ -684,14 +777,52 @@ def main(argv: Optional[list[str]] = None) -> int:
         results = audit_sources(sources)
         failures = [result for result in results if result.status != "ok"]
         for result in results:
-            fields = [result.status, result.feed_type or "-", result.source_id, result.title, result.url]
+            fields = [result.status, result.feed_type or "-", result.source_id, result.title]
+            fields.append(result.url if args.show_sensitive else "[redacted; use --show-sensitive]")
             if result.discovered_url:
-                fields.append(f"discovered={result.discovered_url}")
+                discovered_url = result.discovered_url if args.show_sensitive else "[redacted; use --show-sensitive]"
+                fields.append(f"discovered={discovered_url}")
             if result.detail and result.detail != "ok":
                 fields.append(result.detail)
             print("\t".join(fields))
         print(f"Audited {len(results)} sources; failures: {len(failures)}")
         return 1 if failures else 0
+
+    if args.command == "refresh-plan":
+        route_counts: Counter[str] = Counter()
+        direct_count = 0
+        for source in store.active_sources(args.profile):
+            adapter = adapter_for_source(source)
+            if adapter is None:
+                direct_count += 1
+            else:
+                route_counts[adapter.hosted_route] += 1
+
+        print(f"Refresh plan for profile: {args.profile}")
+        print(
+            f"Generated feed target: every {args.refresh_interval_hours}h; "
+            f"scheduler: every {args.schedule_hours}h; batch: {args.max_sources_per_run} sources"
+        )
+        print(f"Direct reader-managed feeds: {direct_count}")
+        has_capacity_gap = False
+        for route in ("bandcamp", "generated"):
+            plan = refresh_route_plan(
+                route,
+                route_counts[route],
+                args.max_sources_per_run,
+                args.schedule_hours,
+                args.refresh_interval_hours,
+            )
+            status = "fits" if plan.meets_target else "exceeds capacity"
+            print(
+                f"{route}: {plan.source_count} sources; first pass {plan.first_pass_hours}h; "
+                f"capacity per target interval {plan.capacity_per_interval}; {status}"
+            )
+            has_capacity_gap = has_capacity_gap or not plan.meets_target
+        if has_capacity_gap:
+            print("Increase the refresh interval or lower the schedule interval before deploying.")
+            return 1
+        return 0
 
     parser.error("Unknown command")
     return 2

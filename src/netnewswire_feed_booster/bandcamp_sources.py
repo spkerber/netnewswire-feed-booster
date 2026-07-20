@@ -17,13 +17,21 @@ def build_bandcamp_source_from_url(
 ) -> Source:
     site_url = normalize_url(url).rstrip("/")
     parsed = urlparse(site_url)
+    candidate = Source(id="bandcamp-source", title="Bandcamp", feed_url="generated", site_url=site_url, kind="bandcamp")
+    from .generated_adapters import BANDCAMP_ADAPTER
+
+    BANDCAMP_ADAPTER.validate(candidate)
     is_fan = parsed.netloc.lower() == "bandcamp.com"
     if source_type == "fan":
         is_fan = True
     elif source_type == "artist":
         is_fan = False
 
-    html = fetch_text(site_url if is_fan else f"{site_url}/music")
+    html = fetch_text(
+        site_url if is_fan else f"{site_url}/music",
+        allowed_hosts=BANDCAMP_ADAPTER.allowed_hosts,
+        allowed_suffixes=BANDCAMP_ADAPTER.allowed_suffixes,
+    )
     resolved_title = title.strip() or bandcamp_title_from_page(html, fallback=parsed.netloc)
     source_title = (
         resolved_title

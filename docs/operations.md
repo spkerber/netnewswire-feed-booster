@@ -7,6 +7,18 @@ export PYTHONPATH=src
 export RSS_PROFILE=me
 ```
 
+## Maintenance Rhythm
+
+| When | In NetNewsWire / Finder | In the project |
+| --- | --- | --- |
+| When you find a new source | Add a native feed directly when possible; place it in a reader folder | Use the relevant source command only when you want it in the portable registry |
+| Weekly or before a large import | Export an OPML backup if you are about to reorganize an account | Run `audit-sources` and export a candidate OPML |
+| When a feed is noisy | Unsubscribe or move it in the reader after deciding intentionally | Run `unsubscribe` so it cannot return during reconciliation |
+| When a generated source changes | Do not repeatedly refresh it in the reader | Run `refresh-plan`; redeploy only after source or cadence changes |
+| Before sharing code | Keep OPML, profile JSON, and `.env` files out of Finder shares and Git | Run `./scripts/verify_public_template.sh` |
+
+The project is deliberately not an item archive. NetNewsWire owns read/unread state; the bridge keeps only current generated RSS and minimal refresh state. See [Slow Reading And Refresh Policy](reading-practice.md).
+
 ## Sources
 
 ```bash
@@ -17,9 +29,11 @@ python3 -m netnewswire_feed_booster subscribe-podcast https://example.com/feed.x
 python3 -m netnewswire_feed_booster unsubscribe source-id another-source-id --reason "Too noisy" --profile "$RSS_PROFILE"
 ```
 
+For accepted URLs and source-export formats, including Google Takeout's YouTube `subscriptions.csv`, see [Collect Sources](source-collection.md).
+
 Use `add` only for a direct feed that does not have a source-specific command. Exact unsubscribe identifiers may be source IDs, site URLs, feed URLs, or unique titles.
 
-`list` redacts feed URLs. Use `--show-sensitive` only for a local inspection and never paste that output: generated-feed URLs contain the access token.
+Human-readable source commands redact feed URLs by default. Use `--show-sensitive` only for a local inspection and never paste that output: generated-feed URLs contain the access token.
 
 ## Discovery And Audit
 
@@ -40,11 +54,22 @@ python3 -m netnewswire_feed_booster subscribe-hydefm-archive --profile "$RSS_PRO
 python3 -m netnewswire_feed_booster subscribe-mixcloud-profile https://www.mixcloud.com/example/ --profile "$RSS_PROFILE"
 ```
 
-After adding or removing a generated source, redeploy the hosted bridge before exporting hosted OPML:
+After adding or removing a generated source on an already configured Modal host, redeploy the hosted bridge, then export hosted OPML:
 
 ```bash
-./scripts/netnewswire_workflow.sh all
+./scripts/netnewswire_workflow.sh deploy-modal
+./scripts/netnewswire_workflow.sh export
 ```
+
+The deployment is an external action and may use provider credits. Review the private environment file and current refresh plan first. If you use a coding agent, require it to ask before `deploy-modal`. On an initial host setup, follow [Hosted Bridge](hosting.md) instead: you must save the deployed HTTPS endpoint as `RSS_FEED_BASE` before exporting hosted OPML.
+
+Before deploying a large generated-source collection or changing its cadence, inspect the capacity plan:
+
+```bash
+./scripts/netnewswire_workflow.sh refresh-plan
+```
+
+See [Slow Reading And Refresh Policy](reading-practice.md) for the settings in `data/private.env` and their provider-load and freshness tradeoffs.
 
 If only direct feeds changed, regenerate hosted OPML without a deploy:
 
@@ -66,8 +91,9 @@ python3 -m netnewswire_feed_booster unfollow-checklist --profile "$RSS_PROFILE"
 For the iCloud subscription file, verify before repairing:
 
 ```bash
+export NETNEWSWIRE_OPML="/path/to/the/account/Subscriptions.opml"
 ./scripts/netnewswire_workflow.sh verify-netnewswire
 ./scripts/netnewswire_workflow.sh repair-netnewswire
 ```
 
-Repair is explicit and local: it refuses while NetNewsWire is open, creates a backup, replaces the local subscription OPML, validates it, and verifies again.
+Repair is explicit and local: you must set the exact target OPML path, it refuses while NetNewsWire is open, creates a backup, replaces the local subscription OPML, validates it, and verifies again.

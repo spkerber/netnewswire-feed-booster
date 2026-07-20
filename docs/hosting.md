@@ -19,11 +19,26 @@ Tokenless routes return `404`. This makes stale imports visible in logs rather t
 
 ## Modal Setup
 
+Modal is optional and this is an external deployment. Do not continue until direct feeds and local generated-source metadata are working. The commands below create or update Modal resources and may use provider credits.
+
+### Preflight
+
+1. Create a Modal account, then install the optional local dependency and authenticate:
+
+```bash
+python3 -m venv .venv-modal
+.venv-modal/bin/python -m pip install -e ".[modal]"
+.venv-modal/bin/modal setup
+```
+
+2. Confirm `.venv-modal/bin/modal` exists. Do not paste Modal credentials, the bridge token, or `data/private.env` into a chat or repository.
+3. Run `./scripts/bootstrap_profile.sh me` first. The hosted workflow refuses tracked starter data and requires private profile files.
+
 ```bash
 cp examples/private.env.example data/private.env
 ```
 
-Set `RSS_PROFILE`, `RSS_SOURCES_FILE`, `RSS_HISTORY_FILE`, `RSS_FEED_TOKEN`, and unique `MODAL_*` names. Leave `RSS_FEED_BASE` as a placeholder until Modal deploy prints the HTTPS endpoint. The `MODAL_*` values are only for the Modal deployment path; other hosts should use equivalent provider configuration while preserving `RSS_FEED_BASE` and `RSS_FEED_TOKEN`.
+Set `RSS_PROFILE`, `RSS_SOURCES_FILE`, `RSS_HISTORY_FILE`, `RSS_FEED_TOKEN`, and unique `MODAL_*` names. Keep the three profile settings aligned, for example `RSS_PROFILE=me`, `RSS_SOURCES_FILE=data/sources.me.json`, and `RSS_HISTORY_FILE=data/subscription-history.me.json`. Leave `RSS_FEED_BASE` as a placeholder until Modal deploy prints the HTTPS endpoint. The `MODAL_*` values are only for the Modal deployment path; other hosts should use equivalent provider configuration while preserving `RSS_FEED_BASE` and `RSS_FEED_TOKEN`.
 
 ```bash
 ./scripts/netnewswire_workflow.sh deploy-modal
@@ -35,4 +50,4 @@ Copy the deployed HTTPS endpoint into `RSS_FEED_BASE`, then export the hosted OP
 ./scripts/netnewswire_workflow.sh export
 ```
 
-The workflow loads only ignored private environment files, deploys the current source bundle, runs tests, exports hosted OPML, and validates XML. Generated feeds are served from a seed/cache; normal reader requests do not force upstream scraping. Modal refreshes them every six hours, sequentially with a one-second pause, and sends saved `ETag`/`Last-Modified` validators when a source supports them. The token prevents casual enumeration; it is not account-grade authentication, so do not publish tokenized URLs.
+The workflow loads only ignored private environment files, deploys the current source bundle, runs tests, exports hosted OPML, and validates XML. Generated feeds are served from a seed/cache; normal reader requests never force upstream scraping. The default is a 12-hour source refresh interval, an hourly scheduler, and no more than 20 sources per route per run. It sends saved `ETag`/`Last-Modified` validators when a source supports them. The token prevents casual enumeration; it is not account-grade authentication, so do not publish tokenized URLs or paste diagnostics without their default redaction. See [Slow Reading And Refresh Policy](reading-practice.md) for capacity planning and safe configuration changes.

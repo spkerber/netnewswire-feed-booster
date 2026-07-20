@@ -547,8 +547,22 @@ class CliTests(unittest.TestCase):
             )
             store.save()
 
-            with patch("netnewswire_feed_booster.cli.render_nts_show_rss", return_value="<rss>nts</rss>"):
-                with patch("netnewswire_feed_booster.cli.render_hydefm_archive_rss", return_value="<rss>hydefm</rss>"):
+            class FakeAdapter:
+                hosted_route = "generated"
+                allowed_hosts = set()
+                allowed_suffixes = set()
+
+                def validate(self, _source):
+                    return None
+
+                def upstream_url(self, source):
+                    return source.site_url
+
+                def render(self, source, _content):
+                    return "<rss>nts</rss>" if source.source == "nts-local-generated" else "<rss>hydefm</rss>"
+
+            with patch("netnewswire_feed_booster.cli.adapter_for_source", return_value=FakeAdapter()):
+                with patch("netnewswire_feed_booster.cli.fetch_text", return_value="source content"):
                     with redirect_stdout(io.StringIO()):
                         result = main(
                             [

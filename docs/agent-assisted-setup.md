@@ -57,7 +57,7 @@ Never give an agent a provider password, MFA code, GitHub personal access token,
 git clone <public-repository-url> my-rss-stack
 cd my-rss-stack
 export PYTHONPATH=src
-./scripts/bootstrap_profile.sh me --force
+./scripts/bootstrap_profile.sh me
 export RSS_PROFILE=me
 make test
 ```
@@ -124,7 +124,7 @@ PYTHONPATH=src python3 -m netnewswire_feed_booster \
 If you are rebuilding from another local checkout, copy the profile files directly instead of publishing or attaching them. In the new private checkout, initialize the profile once, then replace its empty files with your existing local copies:
 
 ```bash
-./scripts/bootstrap_profile.sh me --force
+./scripts/bootstrap_profile.sh me
 cp /path/to/old-checkout/data/sources.me.json data/sources.me.json
 cp /path/to/old-checkout/data/subscription-history.me.json data/subscription-history.me.json
 cp /path/to/old-checkout/data/profiles.me.json data/profiles.me.json
@@ -184,13 +184,14 @@ Give a local agent this prompt after cloning the public repository and placing y
 ```text
 Act as a cautious local setup assistant for this NetNewsWire Feed Booster repository.
 
-First, read README.md and docs/agent-assisted-setup.md. Treat all files in imports/, exports/, data/private*, and data/*.<profile>.json as private. Do not print, commit, upload, or copy their contents outside this workspace.
+First, read README.md, docs/setup.md, docs/source-collection.md, and docs/agent-assisted-setup.md. Treat all files in imports/, exports/, data/private*, and data/*.<profile>.json as private. Do not print, commit, upload, or copy their contents outside this workspace.
 
 Work in dry-run mode first:
 1. Run tests and inspect the existing profile registry.
 2. Import my local OPML only into the local ignored profile registry.
-3. Report duplicates, category inconsistencies, invalid feeds, generated-feed candidates, and any source requiring manual review.
-4. Produce a candidate OPML and summarize exactly what would change in NetNewsWire.
+3. Classify new inputs using docs/source-collection.md. Keep native RSS, Atom, and JSON Feed URLs direct; use a generated source only when the documented public source type requires it.
+4. Report duplicates, category inconsistencies, invalid feeds, generated-feed candidates, and any source requiring manual review.
+5. Produce a candidate OPML and summarize exactly what would change in NetNewsWire.
 
 Do not deploy, create provider resources, import OPML into NetNewsWire, replace any NetNewsWire file, delete sources, rotate tokens, commit, or push without asking me first and showing the exact command and expected effect.
 

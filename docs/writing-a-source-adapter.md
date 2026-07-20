@@ -1,0 +1,46 @@
+# Writing A Source Adapter
+
+Add an adapter only when a public source has no useful native RSS, Atom, or JSON Feed. Prefer direct feed discovery first: direct feeds are simpler, preserve the publisher's intended format, and do not consume bridge resources.
+
+Reddit is usually a direct-feed case rather than an adapter case. Use its public `.rss` URLs where available. A source such as Mixcloud needs an adapter because the public profile does not advertise a standard feed but has a stable public cloudcasts API.
+
+## Adapter Contract
+
+Every generated source belongs in `generated_adapters.py`. An adapter must define:
+
+- A single `source_label` for persisted source metadata.
+- An exact public source URL shape, validated before any fetch.
+- The approved upstream host or suffix allowlist.
+- A deterministic upstream request URL.
+- A transformation from the public response to valid RSS.
+- Its hosted route type: `bandcamp` or generic `generated`.
+
+The Modal bridge only recognizes adapters in this registry. It serves cached or seeded RSS to readers and never fetches upstream during a reader request. The scheduled job performs the upstream fetch, uses conditional HTTP validators when available, and has a bounded source count per run.
+
+## Mixcloud Example
+
+`mixcloud-local-generated` accepts only a public profile URL with one path segment, such as:
+
+```text
+https://www.mixcloud.com/example/
+```
+
+The adapter converts it to:
+
+```text
+https://api.mixcloud.com/example/cloudcasts/?limit=100
+```
+
+Its allowlist contains only `api.mixcloud.com`. Profile URLs with an extra path, query string, credentials, a non-HTTPS scheme, or another host are rejected before a fetch or deployment can use them.
+
+## Implementation Checklist
+
+1. Confirm that the source has no useful native feed with `discover-feed` and document why a generated feed is justified.
+2. Check the source's public terms, rate limits, and access controls. Do not add authenticated, paid, private, or anti-bot-bypass sources.
+3. Add the adapter and a source-specific CLI command that writes only to ignored profile data.
+4. Add a synthetic or openly shareable parser fixture. Never commit an individual's subscriptions, OPML, tokens, cookies, or saved account pages.
+5. Test rejected URL shapes, the approved upstream allowlist, RSS output, OPML rewriting, and cache-only reader behavior.
+6. Update `docs/source-types.md`, `docs/operations.md`, and this guide with the source's polling and privacy implications.
+7. Run `make test` and `./scripts/verify_public_template.sh` before opening an issue or pull request.
+
+Open an issue before adding a new adapter. Include the public URL shape, fixture provenance, expected RSS item identity, provider load estimate, and any likely breakage risk if the source changes its page or API.

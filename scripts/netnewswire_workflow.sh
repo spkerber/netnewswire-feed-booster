@@ -16,16 +16,8 @@ if [[ -f "${PRIVATE_ENV_FILE}" ]]; then
   set +a
 fi
 RSS_PROFILE="${RSS_PROFILE:-me}"
-if [[ -f "data/sources.${RSS_PROFILE}.json" ]]; then
-  DEFAULT_RSS_SOURCES_FILE="data/sources.${RSS_PROFILE}.json"
-else
-  DEFAULT_RSS_SOURCES_FILE="data/sources.json"
-fi
-if [[ -f "data/subscription-history.${RSS_PROFILE}.json" ]]; then
-  DEFAULT_RSS_HISTORY_FILE="data/subscription-history.${RSS_PROFILE}.json"
-else
-  DEFAULT_RSS_HISTORY_FILE="data/subscription-history.json"
-fi
+DEFAULT_RSS_SOURCES_FILE="data/sources.${RSS_PROFILE}.json"
+DEFAULT_RSS_HISTORY_FILE="data/subscription-history.${RSS_PROFILE}.json"
 RSS_SOURCES_FILE="${RSS_SOURCES_FILE:-${DEFAULT_RSS_SOURCES_FILE}}"
 RSS_HISTORY_FILE="${RSS_HISTORY_FILE:-${DEFAULT_RSS_HISTORY_FILE}}"
 MODAL_APP_NAME="${MODAL_APP_NAME:-rss-feed-bridge}"
@@ -35,7 +27,29 @@ RSS_FEED_BASE="${RSS_FEED_BASE:-${MODAL_FEED_BASE:-}}"
 RSS_FEED_TOKEN="${RSS_FEED_TOKEN:-${BANDCAMP_FEED_TOKEN:-}}"
 OUT_FILE="${NETNEWSWIRE_OPML_OUT:-exports/${RSS_PROFILE}-netnewswire-hosted.opml}"
 MODAL_BIN="${MODAL_BIN:-.venv-modal/bin/modal}"
-NETNEWSWIRE_OPML="${NETNEWSWIRE_OPML:-${HOME}/Library/Containers/com.ranchero.NetNewsWire-Evergreen/Data/Library/Application Support/NetNewsWire/Accounts/2_iCloud/Subscriptions.opml}"
+NETNEWSWIRE_OPML="${NETNEWSWIRE_OPML:-}"
+
+require_private_profile() {
+  if [[ "${RSS_SOURCES_FILE}" == "data/sources.json" || "${RSS_HISTORY_FILE}" == "data/subscription-history.json" ]]; then
+    echo "Refusing to use tracked starter data. Set RSS_SOURCES_FILE and RSS_HISTORY_FILE to private profile files." >&2
+    exit 1
+  fi
+  if [[ ! -f "${RSS_SOURCES_FILE}" || ! -f "${RSS_HISTORY_FILE}" ]]; then
+    echo "Missing private profile files for RSS_PROFILE=${RSS_PROFILE}. Run ./scripts/bootstrap_profile.sh ${RSS_PROFILE} first." >&2
+    exit 1
+  fi
+}
+
+require_netnewswire_opml() {
+  if [[ -z "${NETNEWSWIRE_OPML}" ]]; then
+    echo "Set NETNEWSWIRE_OPML to the specific NetNewsWire subscription OPML file before verifying or repairing it." >&2
+    exit 1
+  fi
+  if [[ ! -f "${NETNEWSWIRE_OPML}" ]]; then
+    echo "Missing NetNewsWire OPML: ${NETNEWSWIRE_OPML}" >&2
+    exit 1
+  fi
+}
 
 require_feed_token() {
   if [[ ! -f "${PRIVATE_ENV_FILE}" ]]; then
@@ -57,6 +71,7 @@ require_feed_base() {
 }
 
 deploy_modal() {
+  require_private_profile
   require_feed_token
   if [[ ! -x "${MODAL_BIN}" ]]; then
     echo "Missing ${MODAL_BIN}. Create .venv-modal and install .[modal] before deploying." >&2
@@ -68,6 +83,7 @@ deploy_modal() {
 }
 
 export_opml() {
+  require_private_profile
   require_feed_base
   PYTHONPATH=src python3 -m unittest discover -s tests
   PYTHONPATH=src python3 -m netnewswire_feed_booster \
@@ -82,12 +98,18 @@ export_opml() {
   echo "Wrote ${OUT_FILE}"
 }
 
+refresh_plan() {
+  require_private_profile
+  PYTHONPATH=src python3 -m netnewswire_feed_booster \
+    --data "${RSS_SOURCES_FILE}" \
+    --history "${RSS_HISTORY_FILE}" \
+    refresh-plan \
+    --profile "${RSS_PROFILE}"
+}
+
 verify_netnewswire() {
   export_opml
-  if [[ ! -f "${NETNEWSWIRE_OPML}" ]]; then
-    echo "Missing NetNewsWire OPML: ${NETNEWSWIRE_OPML}" >&2
-    exit 1
-  fi
+  require_netnewswire_opml
   PYTHONPATH=src python3 -m netnewswire_feed_booster \
     --data "${RSS_SOURCES_FILE}" \
     --history "${RSS_HISTORY_FILE}" \
@@ -99,10 +121,7 @@ verify_netnewswire() {
 
 repair_netnewswire() {
   export_opml
-  if [[ ! -f "${NETNEWSWIRE_OPML}" ]]; then
-    echo "Missing NetNewsWire OPML: ${NETNEWSWIRE_OPML}" >&2
-    exit 1
-  fi
+  require_netnewswire_opml
 
   set +e
   PYTHONPATH=src python3 -m netnewswire_feed_booster \
@@ -148,6 +167,9 @@ case "${MODE}" in
   export)
     export_opml
     ;;
+  refresh-plan)
+    refresh_plan
+    ;;
   verify-netnewswire)
     verify_netnewswire
     ;;
@@ -159,7 +181,7 @@ case "${MODE}" in
     export_opml
     ;;
   *)
-    echo "Usage: $0 [deploy-modal|export|verify-netnewswire|repair-netnewswire|all]" >&2
+    echo "Usage: $0 [deploy-modal|export|refresh-plan|verify-netnewswire|repair-netnewswire|all]" >&2
     exit 2
     ;;
 esac

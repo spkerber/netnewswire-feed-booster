@@ -12,6 +12,7 @@ from .bandcamp import (
 )
 from .feed_store import Source
 from .http_client import fetch_text
+from .generated_adapters import hosted_route_for_source
 
 
 FetchText = Callable[[str], str]
@@ -36,9 +37,10 @@ def hosted_generated_feed_url(base_url: str, source_id: str, token: str = "") ->
 def sources_with_hosted_bandcamp_feeds(sources: Iterable[Source], base_url: str, token: str = "") -> List[Source]:
     rewritten: List[Source] = []
     for source in sources:
-        if source.kind == "bandcamp":
+        hosted_route = hosted_route_for_source(source)
+        if hosted_route == "bandcamp":
             rewritten.append(replace(source, feed_url=hosted_bandcamp_feed_url(base_url, source.id, token=token)))
-        elif source.source in {"nts-local-generated", "radio-local-generated", "mixcloud-local-generated"}:
+        elif hosted_route == "generated":
             rewritten.append(replace(source, feed_url=hosted_generated_feed_url(base_url, source.id, token=token)))
         else:
             rewritten.append(source)
@@ -66,12 +68,16 @@ def bandcamp_items_for_source(
     html: str,
     fan_max_items: Optional[int] = 40,
     full_fan_source_ids: Optional[Set[str]] = None,
+    max_items: Optional[int] = 50,
 ) -> list:
     if is_bandcamp_artist_source(source):
-        return parse_bandcamp_artist_music_html(html, source.site_url)
+        items = parse_bandcamp_artist_music_html(html, source.site_url)
+        return items[:max_items] if max_items is not None else items
 
-    max_items = None if source.id in (full_fan_source_ids or set()) else fan_max_items
-    return fetch_bandcamp_collection_items(html, max_items=max_items)
+    fan_limit = max_items if source.id in (full_fan_source_ids or set()) else fan_max_items
+    if max_items is not None and fan_limit is not None:
+        fan_limit = min(fan_limit, max_items)
+    return fetch_bandcamp_collection_items(html, max_items=fan_limit)
 
 
 def render_bandcamp_source_rss(
@@ -79,6 +85,7 @@ def render_bandcamp_source_rss(
     fetcher: FetchText = fetch_text,
     fan_max_items: Optional[int] = 40,
     full_fan_source_ids: Optional[Set[str]] = None,
+    max_items: Optional[int] = 50,
 ) -> str:
     html = fetcher(bandcamp_fetch_url(source))
     items = bandcamp_items_for_source(
@@ -86,6 +93,7 @@ def render_bandcamp_source_rss(
         html,
         fan_max_items=fan_max_items,
         full_fan_source_ids=full_fan_source_ids,
+        max_items=max_items,
     )
     if not items:
         raise ValueError(f"No Bandcamp items found for {source.id}: {source.site_url}")
@@ -98,6 +106,7 @@ def write_bandcamp_source_rss(
     fetcher: FetchText = fetch_text,
     fan_max_items: Optional[int] = 40,
     full_fan_source_ids: Optional[Set[str]] = None,
+    max_items: Optional[int] = 50,
 ) -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(
@@ -106,6 +115,7 @@ def write_bandcamp_source_rss(
             fetcher=fetcher,
             fan_max_items=fan_max_items,
             full_fan_source_ids=full_fan_source_ids,
+            max_items=max_items,
         ),
         encoding="utf-8",
     )

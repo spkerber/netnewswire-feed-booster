@@ -5,6 +5,13 @@ from typing import Optional
 from .feed_store import FeedStore, Source, normalize_url
 
 
+REDACTED_FEED_URL = "[redacted; use --show-sensitive]"
+
+
+def display_feed_url(source: Source, show_sensitive: bool = False) -> str:
+    return source.feed_url if show_sensitive else REDACTED_FEED_URL
+
+
 def active_sources_with_private(store: FeedStore, private_store: FeedStore, profile: str) -> list[Source]:
     return unique_sources(store.active_sources(profile) + private_store.active_sources(profile))
 
@@ -70,7 +77,7 @@ def drift_has_failures(drift: dict[str, list[Source]]) -> bool:
     return any(drift.values())
 
 
-def print_drift_report(drift: dict[str, list[Source]]) -> None:
+def print_drift_report(drift: dict[str, list[Source]], show_sensitive: bool = False) -> None:
     if not drift_has_failures(drift):
         print("NetNewsWire subscriptions match the hosted OPML export.")
         return
@@ -79,7 +86,7 @@ def print_drift_report(drift: dict[str, list[Source]]) -> None:
     for name, sources in drift.items():
         print(f"{name}: {len(sources)}")
         for source in sources[:20]:
-            print(f"  {source.title}\t{source.feed_url}")
+            print(f"  {source.title}\t{display_feed_url(source, show_sensitive)}")
         if len(sources) > 20:
             print(f"  ... {len(sources) - 20} more")
 

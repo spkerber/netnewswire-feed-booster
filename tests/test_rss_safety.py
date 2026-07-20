@@ -2,7 +2,7 @@ import unittest
 from email.message import Message
 from urllib.error import HTTPError
 
-from netnewswire_feed_booster.rss_safety import ensure_rss_channel, is_safe_source_id, parse_internet_date, safe_https_url, validate_source_id
+from netnewswire_feed_booster.rss_safety import ensure_rss_channel, is_safe_source_id, limit_rss_items, parse_internet_date, safe_https_url, validate_source_id
 from netnewswire_feed_booster.http_client import fetch_text, fetch_text_response
 
 
@@ -50,6 +50,21 @@ class RssSafetyTests(unittest.TestCase):
         for value in ["not xml", "<rss></rss>", "<feed><title>Atom</title></feed>"]:
             with self.assertRaises(ValueError):
                 ensure_rss_channel(value)
+
+    def test_limit_rss_items_keeps_only_the_current_window(self) -> None:
+        rss = (
+            '<?xml version="1.0"?><rss version="2.0"><channel><title>OK</title>'
+            '<item><guid>one</guid></item><item><guid>two</guid></item><item><guid>three</guid></item>'
+            "</channel></rss>"
+        )
+
+        limited = limit_rss_items(rss, 2)
+
+        self.assertIn("<guid>one</guid>", limited)
+        self.assertIn("<guid>two</guid>", limited)
+        self.assertNotIn("<guid>three</guid>", limited)
+        with self.assertRaises(ValueError):
+            limit_rss_items(rss, 0)
 
     def test_parse_internet_date_supports_rfc822_and_iso8601(self) -> None:
         self.assertEqual(parse_internet_date("Tue, 13 Jul 2026 10:00:00 +0000").year, 2026)

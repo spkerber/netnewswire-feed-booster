@@ -7,14 +7,7 @@ from typing import Dict, List
 from urllib.parse import urlsplit, urlunsplit
 
 from .feed_store import FeedStore, Source
-
-
-GENERATED_SOURCE_LABELS = {
-    "bandcamp-local-generated",
-    "nts-local-generated",
-    "radio-local-generated",
-    "mixcloud-local-generated",
-}
+from .generated_adapters import GENERATED_SOURCE_LABELS
 
 
 @dataclass
@@ -70,7 +63,7 @@ def plan_generated_source_migration(
             replacements[existing.id] = rebuilt
         elif existing:
             conflicts.append(
-                f"{rebuilt.id}: target has a non-generated feed URL; refusing to overwrite {existing.feed_url}"
+                f"{rebuilt.id}: target has a non-generated feed URL; refusing to overwrite it"
             )
         elif len(legacy_site_matches) == 1:
             replacements[legacy_site_matches[0].id] = rebuilt

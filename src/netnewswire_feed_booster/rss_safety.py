@@ -70,6 +70,21 @@ def ensure_rss_channel(rss: str) -> str:
     return rss
 
 
+def limit_rss_items(rss: str, max_items: int) -> str:
+    """Keep generated feed payloads bounded without retaining article history."""
+    if max_items < 1:
+        raise ValueError("RSS item limit must be positive")
+    root = ET.fromstring(ensure_rss_channel(rss))
+    channel = root.find("channel")
+    if channel is None:
+        raise ValueError("Feed content is not an RSS channel")
+    items = channel.findall("item")
+    for item in items[max_items:]:
+        channel.remove(item)
+    ET.indent(root, space="  ")
+    return '<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(root, encoding="unicode") + "\n"
+
+
 def parse_internet_date(value: str) -> datetime:
     value = (value or "").strip()
     if not value:

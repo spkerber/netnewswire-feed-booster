@@ -22,7 +22,8 @@ while IFS= read -r -d '' path; do
   esac
   mkdir -p "$destination/$(dirname "$path")"
   cp -p "$path" "$destination/$path"
-done < <(git ls-files -z)
+# Include non-ignored working files so verification catches new files before staging.
+done < <(git ls-files --cached --others --exclude-standard -z)
 
 cat <<'EOF'
 Prepared a public-copy candidate. Review it before publishing:

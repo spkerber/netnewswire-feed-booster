@@ -18,9 +18,10 @@ def mixcloud_cloudcasts_url(profile_url: str, limit: int = 100) -> str:
     parsed = urlparse(profile_url)
     if parsed.scheme != "https" or (parsed.hostname or "").lower() not in {"mixcloud.com", "www.mixcloud.com"}:
         raise ValueError(f"Unsupported Mixcloud profile URL: {profile_url}")
-    username = parsed.path.strip("/").split("/")[0]
-    if not username:
+    path_parts = [part for part in parsed.path.split("/") if part]
+    if len(path_parts) != 1 or parsed.username or parsed.password or parsed.query or parsed.fragment:
         raise ValueError(f"Missing Mixcloud username: {profile_url}")
+    username = path_parts[0]
     return f"https://api.mixcloud.com/{username}/cloudcasts/?limit={limit}"
 
 

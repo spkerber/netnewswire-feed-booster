@@ -119,8 +119,8 @@ class OpmlTests(unittest.TestCase):
             updated = FeedStore(data_path)
 
         self.assertEqual(updated.source_by_id("bandcamp-ghost-dubs").groups, ["Bandcamp"])
-        self.assertEqual(updated.source_by_id("split-infinitives").groups, ["blogs"])
-        self.assertEqual(updated.source_by_id("nyt-movies").groups, ["culture"])
+        self.assertEqual(updated.source_by_id("split-infinitives").groups, ["video"])
+        self.assertEqual(updated.source_by_id("nyt-movies").groups, ["video"])
 
 
 if __name__ == "__main__":

@@ -13,10 +13,6 @@ VALID_STATUSES = {"active", "candidate", "paused", "unsubscribed"}
 VALID_KINDS = {"website", "substack", "youtube", "bandcamp", "newsletter", "podcast", "other"}
 BANDCAMP_GROUP = "Bandcamp"
 BANDCAMP_GROUP_ALIASES = {"bandcamp", "bandcamp artists", "bandcamp fans"}
-SOURCE_GROUP_OVERRIDES = {
-    "nyt-movies": ["culture"],
-    "split-infinitives": ["blogs"],
-}
 
 
 def repo_root() -> Path:
@@ -257,8 +253,6 @@ def unique_id(base_id: str, existing_ids: Iterable[str]) -> str:
 
 
 def normalize_groups_for_source(source: Source, extra_groups: Optional[List[str]] = None) -> List[str]:
-    if source.id in SOURCE_GROUP_OVERRIDES:
-        return SOURCE_GROUP_OVERRIDES[source.id]
     if source.kind == "bandcamp":
         return [BANDCAMP_GROUP]
 
