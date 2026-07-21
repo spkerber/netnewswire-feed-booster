@@ -10,7 +10,7 @@ from .bandcamp import (
 )
 from .bandcamp_sources import build_bandcamp_source_from_url
 from .subscription_history import SubscriptionHistoryStore, default_subscription_history_path
-from .feed_store import FeedStore, Source, default_private_sources_path, default_sources_path, normalize_url, slugify
+from .feed_store import FeedStore, Source, default_private_sources_path, default_sources_path, normalize_url, slugify, source_id_from_title
 from .feed_validation import audit_sources, discover_feed_url
 from .generated_migration import apply_generated_source_migration, plan_generated_source_migration
 from .generated_adapters import BANDCAMP_ADAPTER, HYDEFM_ADAPTER, NTS_ADAPTER, adapter_for_source
@@ -102,58 +102,58 @@ def build_parser() -> argparse.ArgumentParser:
     subscribe_substack_parser.add_argument("domain_or_url")
     subscribe_substack_parser.add_argument("--title", default="")
     subscribe_substack_parser.add_argument("--profile", default=DEFAULT_PROFILE)
-    subscribe_substack_parser.add_argument("--group", default="Substack")
+    subscribe_substack_parser.add_argument("--group", default="")
     subscribe_substack_parser.add_argument("--notes", default="")
 
     subscribe_youtube_parser = subparsers.add_parser("subscribe-youtube", help="One-off add or reactivate a YouTube channel RSS feed by channel ID")
     subscribe_youtube_parser.add_argument("channel_id")
     subscribe_youtube_parser.add_argument("--title", required=True)
     subscribe_youtube_parser.add_argument("--profile", default=DEFAULT_PROFILE)
-    subscribe_youtube_parser.add_argument("--group", default="YouTube")
+    subscribe_youtube_parser.add_argument("--group", default="")
     subscribe_youtube_parser.add_argument("--notes", default="")
 
     youtube_url_parser = subparsers.add_parser("import-youtube-channel-url", help="Import one YouTube channel URL by reading its RSS metadata")
     youtube_url_parser.add_argument("url")
     youtube_url_parser.add_argument("--title", default="")
     youtube_url_parser.add_argument("--profile", default=DEFAULT_PROFILE)
-    youtube_url_parser.add_argument("--group", default="YouTube")
+    youtube_url_parser.add_argument("--group", default="")
 
     youtube_subs_parser = subparsers.add_parser("import-youtube-subscriptions", help="Import YouTube subscriptions from a CSV or local list")
     youtube_subs_parser.add_argument("path", type=Path)
     youtube_subs_parser.add_argument("--profile", default=DEFAULT_PROFILE)
-    youtube_subs_parser.add_argument("--group", default="YouTube")
+    youtube_subs_parser.add_argument("--group", default="")
 
     substack_profile_parser = subparsers.add_parser("import-substack-profile", help="Import public Substack subscriptions from a profile page")
     substack_profile_parser.add_argument("url")
     substack_profile_parser.add_argument("--profile", default=DEFAULT_PROFILE)
-    substack_profile_parser.add_argument("--group", default="Substack")
+    substack_profile_parser.add_argument("--group", default="")
 
     substack_library_parser = subparsers.add_parser("import-substack-library", help="Import Substack subscriptions from a saved library HTML page")
     substack_library_parser.add_argument("path", type=Path)
     substack_library_parser.add_argument("--profile", default=DEFAULT_PROFILE)
-    substack_library_parser.add_argument("--group", default="Substack")
+    substack_library_parser.add_argument("--group", default="")
 
     soundcloud_following_parser = subparsers.add_parser("import-soundcloud-following", help="Import followed SoundCloud profiles as public profile RSS feeds")
     soundcloud_following_parser.add_argument("url")
     soundcloud_following_parser.add_argument("--profile", default=DEFAULT_PROFILE)
-    soundcloud_following_parser.add_argument("--group", default="SoundCloud")
+    soundcloud_following_parser.add_argument("--group", default="")
 
     nts_show_parser = subparsers.add_parser("subscribe-nts-show", help="Generate and subscribe to a local RSS feed for an NTS show page")
     nts_show_parser.add_argument("url")
     nts_show_parser.add_argument("--profile", default=DEFAULT_PROFILE)
-    nts_show_parser.add_argument("--group", default="NTS")
+    nts_show_parser.add_argument("--group", default="")
     nts_show_parser.add_argument("--out-dir", type=Path, default=Path("exports/generated"))
 
     hydefm_parser = subparsers.add_parser("subscribe-hydefm-archive", help="Generate and subscribe to a local RSS feed for HydeFM archives")
     hydefm_parser.add_argument("--url", default=HYDEFM_ARCHIVE_URL)
     hydefm_parser.add_argument("--profile", default=DEFAULT_PROFILE)
-    hydefm_parser.add_argument("--group", default="HydeFM")
+    hydefm_parser.add_argument("--group", default="")
     hydefm_parser.add_argument("--out-dir", type=Path, default=Path("exports/generated"))
 
     mixcloud_parser = subparsers.add_parser("subscribe-mixcloud-profile", help="Generate and subscribe to RSS from a public Mixcloud profile")
     mixcloud_parser.add_argument("url")
     mixcloud_parser.add_argument("--profile", default=DEFAULT_PROFILE)
-    mixcloud_parser.add_argument("--group", default="Mixcloud")
+    mixcloud_parser.add_argument("--group", default="")
     mixcloud_parser.add_argument("--out-dir", type=Path, default=Path("exports/generated"))
 
     bandcamp_local_parser = subparsers.add_parser("refresh-bandcamp-local-feeds", help="Generate local RSS files for all saved Bandcamp artist and fan sources")
@@ -179,6 +179,7 @@ def build_parser() -> argparse.ArgumentParser:
     bandcamp_source_parser.add_argument("url")
     bandcamp_source_parser.add_argument("--title", default="")
     bandcamp_source_parser.add_argument("--profile", default=DEFAULT_PROFILE)
+    bandcamp_source_parser.add_argument("--group", default="")
     bandcamp_source_parser.add_argument("--source-type", choices=["auto", "artist", "fan"], default="auto")
     bandcamp_source_parser.add_argument("--out-dir", type=Path, default=Path("exports/bandcamp"))
     bandcamp_source_parser.add_argument("--fan-max-items", type=int, default=40)
@@ -189,7 +190,7 @@ def build_parser() -> argparse.ArgumentParser:
     podcast_parser.add_argument("url")
     podcast_parser.add_argument("--title", default="")
     podcast_parser.add_argument("--profile", default=DEFAULT_PROFILE)
-    podcast_parser.add_argument("--group", default="Podcasts")
+    podcast_parser.add_argument("--group", default="")
     podcast_parser.add_argument("--private", action="store_true", help="Write to the local gitignored private source overlay")
 
     status_parser = subparsers.add_parser("set-status", help="Set a source status")
@@ -197,6 +198,12 @@ def build_parser() -> argparse.ArgumentParser:
     status_parser.add_argument("--status", required=True, choices=["active", "candidate", "paused", "unsubscribed"])
     status_parser.add_argument("--profile", default=DEFAULT_PROFILE)
     status_parser.add_argument("--reason", default="")
+
+    folder_parser = subparsers.add_parser("set-folder", help="Set one ordered OPML folder path for a source")
+    folder_parser.add_argument("identifier", help="Exact source ID, site URL, feed URL, or unique title")
+    folder_parser.add_argument("folders", nargs="*", help="Folder path, from top level to leaf; omit to place at OPML root")
+    folder_parser.add_argument("--profile", default=DEFAULT_PROFILE)
+    folder_parser.add_argument("--private", action="store_true", help="Update the local gitignored private source overlay")
 
     unsubscribe_parser = subparsers.add_parser("unsubscribe", help="Remove one or more exact sources from RSS export intent")
     unsubscribe_parser.add_argument("identifiers", nargs="+", help="Exact source ID, site URL, feed URL, or unique title")
@@ -348,10 +355,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 0
 
     if args.command == "add":
+        feed_url = normalize_url(args.feed_url)
         source = Source(
-            id=slugify(args.title),
+            id=source_id_from_title(args.title, feed_url),
             title=args.title,
-            feed_url=normalize_url(args.feed_url),
+            feed_url=feed_url,
             site_url=normalize_url(args.site_url) if args.site_url else "",
             kind=args.kind,
             profiles=[args.profile],
@@ -369,7 +377,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         domain = args.domain_or_url.replace("https://", "").replace("http://", "").strip("/")
         title = args.title or domain.replace(".substack.com", "").replace("www.", "")
         source = Source(
-            id=slugify(title),
+            id=source_id_from_title(title, domain),
             title=title,
             feed_url=f"https://{domain}/feed",
             site_url=f"https://{domain}",
@@ -389,7 +397,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     if args.command == "subscribe-youtube":
         feed_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={args.channel_id}"
         source = Source(
-            id=slugify(args.title),
+            id=source_id_from_title(args.title, args.channel_id),
             title=args.title,
             feed_url=feed_url,
             site_url=f"https://www.youtube.com/channel/{args.channel_id}",
@@ -634,6 +642,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             args.url,
             title=args.title,
             profile=args.profile,
+            group=args.group,
             source_type=args.source_type,
             out_dir=args.out_dir,
         )
@@ -679,6 +688,15 @@ def main(argv: Optional[list[str]] = None) -> int:
             history_store.save()
         store.save()
         print(f"Set {source.id} to {source.status}")
+        return 0
+
+    if args.command == "set-folder":
+        target_store = private_store if args.private else store
+        source = resolve_source_identifier(target_store.sources(), args.identifier, profile=args.profile)
+        updated_source = target_store.set_folder_path(source.id, args.folders)
+        target_store.save()
+        location = " / ".join(updated_source.groups) or "OPML root"
+        print(f"Set folder path for {updated_source.id}: {location}")
         return 0
 
     if args.command == "unsubscribe":

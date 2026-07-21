@@ -26,12 +26,13 @@ python3 -m netnewswire_feed_booster list --profile "$RSS_PROFILE"
 python3 -m netnewswire_feed_booster subscribe-substack oneusefulthing.substack.com --title "One Useful Thing" --profile "$RSS_PROFILE"
 python3 -m netnewswire_feed_booster subscribe-youtube UC_x5XG1OV2P6uZZ5FSM9Ttw --title "Google Developers" --profile "$RSS_PROFILE"
 python3 -m netnewswire_feed_booster subscribe-podcast https://example.com/feed.xml --profile "$RSS_PROFILE"
+python3 -m netnewswire_feed_booster set-folder source-id "My Folder" "Optional Subfolder" --profile "$RSS_PROFILE"
 python3 -m netnewswire_feed_booster unsubscribe source-id another-source-id --reason "Too noisy" --profile "$RSS_PROFILE"
 ```
 
 For accepted URLs and source-export formats, including Google Takeout's YouTube `subscriptions.csv`, see [Collect Sources](source-collection.md).
 
-Use `add` only for a direct feed that does not have a source-specific command. Exact unsubscribe identifiers may be source IDs, site URLs, feed URLs, or unique titles.
+Use `add` only for a direct feed that does not have a source-specific command. Exact source identifiers may be source IDs, site URLs, feed URLs, or unique titles. Folder names are personal: use `set-folder` only if you want portable OPML folders, and choose the structure yourself.
 
 Human-readable source commands redact feed URLs by default. Use `--show-sensitive` only for a local inspection and never paste that output: generated-feed URLs contain the access token.
 

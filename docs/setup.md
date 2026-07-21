@@ -63,6 +63,12 @@ my-rss-stack/
 
 Finder can show hidden files with `Command-Shift-.` if you need to verify `.gitignore`, but do not drag a `.env`, OPML export, or profile JSON into GitHub or a public chat.
 
+When you need hosted generated feeds, create the ignored environment file with owner-only permissions so its token is not readable by other local accounts:
+
+```bash
+install -m 600 examples/private.env.example data/private.env
+```
+
 ## Terminal Workflow
 
 ### 1. Create a Private Working Copy
@@ -152,6 +158,6 @@ The repository includes a tested Modal deployment. Cloudflare, Railway, and Digi
 After the first successful import:
 
 1. Confirm new subscriptions appear only in the account you selected.
-2. Use NetNewsWire folders for reading organization; use the registry categories for portable OPML organization.
+2. Use NetNewsWire folders for reading organization. If you want those folders to travel with a portable OPML export, save your own folder path in the registry; the project does not impose categories.
 3. Keep direct feeds direct; do not proxy a publisher’s working HTTPS feed.
 4. Run the maintenance routine in [Operations](operations.md) before a large import or after a major cleanup.

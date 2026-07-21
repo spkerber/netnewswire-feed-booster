@@ -28,36 +28,36 @@ from netnewswire_feed_booster.youtube import (
 
 
 SUBSTACK_HTML = r'''
-<script>window._preloads = JSON.parse("{\"profile\":{\"subscriptions\":[{\"publication\":{\"name\":\"NEFARIOUS RUSSIANS\",\"subdomain\":\"yasha\",\"custom_domain\":\"www.nefariousrussians.com\"}}]}}")</script>
+<script>window._preloads = JSON.parse("{\"profile\":{\"subscriptions\":[{\"publication\":{\"name\":\"Fixture Dispatch\",\"subdomain\":\"fixture-dispatch\",\"custom_domain\":\"fixture-dispatch.example\"}}]}}")</script>
 '''
 
 YOUTUBE_HTML = '''
 <html>
   <head>
-    <link rel="alternate" type="application/rss+xml" title="RSS" href="https://www.youtube.com/feeds/videos.xml?channel_id=UCpeHRAz2crCXJNTDYxvIayg">
-    <meta property="og:title" content="s">
+    <link rel="alternate" type="application/rss+xml" title="RSS" href="https://www.youtube.com/feeds/videos.xml?channel_id=UCfixture1234567890">
+    <meta property="og:title" content="Fixture Video">
   </head>
 </html>
 '''
 
 YOUTUBE_SUBSCRIPTIONS_HTML = r'''
 <script>
-{"channelRenderer":{"channelId":"UCgfoJ30D15TF5yErtR1wjVQ","title":{"simpleText":"0 Plays"},"navigationEndpoint":{"commandMetadata":{"webCommandMetadata":{"url":"/@0PlaysRecords"}},"browseEndpoint":{"browseId":"UCgfoJ30D15TF5yErtR1wjVQ","canonicalBaseUrl":"/@0PlaysRecords"}}}}
-{"channelRenderer":{"channelId":"UCgfoJ30D15TF5yErtR1wjVQ","title":{"simpleText":"0 Plays"},"navigationEndpoint":{"commandMetadata":{"webCommandMetadata":{"url":"/@0PlaysRecords"}},"browseEndpoint":{"browseId":"UCgfoJ30D15TF5yErtR1wjVQ","canonicalBaseUrl":"/@0PlaysRecords"}}}}
+{"channelRenderer":{"channelId":"UCfixture2345678901","title":{"simpleText":"Fixture Channel"},"navigationEndpoint":{"commandMetadata":{"webCommandMetadata":{"url":"/@fixture-channel"}},"browseEndpoint":{"browseId":"UCfixture2345678901","canonicalBaseUrl":"/@fixture-channel"}}}}
+{"channelRenderer":{"channelId":"UCfixture2345678901","title":{"simpleText":"Fixture Channel"},"navigationEndpoint":{"commandMetadata":{"webCommandMetadata":{"url":"/@fixture-channel"}},"browseEndpoint":{"browseId":"UCfixture2345678901","canonicalBaseUrl":"/@fixture-channel"}}}}
 </script>
 '''
 
 SUBSTACK_LIBRARY_HTML = '''
-<a href="https://donotresearch.substack.com/" class="pencraft libraryItem-aPXCP4">
-  <span>Do Not Research</span>
+<a href="https://fixture-brief.example/" class="pencraft libraryItem-aPXCP4">
+  <span>Fixture Brief</span>
 </a>
-<a href="https://www.dropsitenews.com/" class="pencraft libraryItem-aPXCP4">
-  <span>Drop Site News</span>
+<a href="https://fixture-dispatch.example/" class="pencraft libraryItem-aPXCP4">
+  <span>Fixture Dispatch</span>
 </a>
 '''
 
 BANDCAMP_HTML = '''
-<div id="pagedata" data-blob="{&quot;item_cache&quot;:{&quot;collection&quot;:{&quot;a1&quot;:{&quot;item_title&quot;:&quot;puremess&quot;,&quot;band_name&quot;:&quot;luckystrike&quot;,&quot;item_url&quot;:&quot;https://luckyluckystrike.bandcamp.com/album/puremess&quot;,&quot;item_type&quot;:&quot;album&quot;,&quot;item_art_id&quot;:537894927,&quot;featured_track_title&quot;:&quot;printing&quot;,&quot;purchased&quot;:&quot;17 Jun 2026 17:28:07 GMT&quot;}}}}"></div>
+<div id="pagedata" data-blob="{&quot;item_cache&quot;:{&quot;collection&quot;:{&quot;a1&quot;:{&quot;item_title&quot;:&quot;fixture-album&quot;,&quot;band_name&quot;:&quot;fixture-artist&quot;,&quot;item_url&quot;:&quot;https://fixture-artist.bandcamp.com/album/fixture-album&quot;,&quot;item_type&quot;:&quot;album&quot;,&quot;item_art_id&quot;:537894927,&quot;featured_track_title&quot;:&quot;fixture-track&quot;,&quot;purchased&quot;:&quot;17 Jun 2026 17:28:07 GMT&quot;}}}}"></div>
 '''
 
 BANDCAMP_PAGINATED_HTML = '''
@@ -65,28 +65,28 @@ BANDCAMP_PAGINATED_HTML = '''
 '''
 
 BANDCAMP_ARTIST_MUSIC_HTML = '''
-<ol id="music-grid" data-client-items="[{&quot;art_id&quot;:1463768112,&quot;artist&quot;:&quot;Jake Muir&quot;,&quot;band_id&quot;:1601512585,&quot;id&quot;:2261764695,&quot;page_url&quot;:&quot;/album/campana-sonans&quot;,&quot;title&quot;:&quot;Campana Sonans&quot;,&quot;type&quot;:&quot;album&quot;}]"></ol>
+<ol id="music-grid" data-client-items="[{&quot;art_id&quot;:1463768112,&quot;artist&quot;:&quot;Fixture Artist&quot;,&quot;band_id&quot;:1601512585,&quot;id&quot;:2261764695,&quot;page_url&quot;:&quot;/album/fixture-record&quot;,&quot;title&quot;:&quot;Fixture Record&quot;,&quot;type&quot;:&quot;album&quot;}]"></ol>
 '''
 
 BANDCAMP_LEGACY_ARTIST_MUSIC_HTML = '''
-<meta property="og:title" content="40split">
+<meta property="og:title" content="Fixture Legacy">
 <ol id="music-grid">
   <li data-item-id="track-2912635660" class="music-grid-item square">
-    <a href="/track/party-ppl">
+    <a href="/track/fixture-track">
       <div class="art"><img src="https://f4.bcbits.com/img/a2897198964_2.jpg" alt="" /></div>
-      <p class="title">party ppl</p>
+      <p class="title">fixture track</p>
     </a>
   </li>
 </ol>
 '''
 
 BANDCAMP_TRALBUM_HTML = '''
-<meta property="og:title" content="FLASH BLIND, by kk.Shucko">
+<meta property="og:title" content="Fixture Album, by Fixture Archive">
 <meta property="og:type" content="album">
-<meta property="og:site_name" content="kk.Shucko">
+<meta property="og:site_name" content="Fixture Archive">
 <meta property="og:image" content="https://f4.bcbits.com/img/a1373901960_5.jpg">
-<meta property="og:url" content="https://kkshucko.bandcamp.com/album/flash-blind">
-<div data-tralbum="{&quot;current&quot;:{&quot;title&quot;:&quot;FLASH BLIND&quot;,&quot;publish_date&quot;:&quot;23 Feb 2026 00:33:16 GMT&quot;,&quot;artist&quot;:null}}"></div>
+<meta property="og:url" content="https://fixture-archive.bandcamp.com/album/fixture-album">
+<div data-tralbum="{&quot;current&quot;:{&quot;title&quot;:&quot;Fixture Album&quot;,&quot;publish_date&quot;:&quot;23 Feb 2026 00:33:16 GMT&quot;,&quot;artist&quot;:null}}"></div>
 '''
 
 SOUNDCLOUD_HTML = '''
@@ -116,15 +116,15 @@ class SourceImporterTests(unittest.TestCase):
         sources = parse_substack_profile_html(SUBSTACK_HTML, profile="test-user", group="Substack")
 
         self.assertEqual(len(sources), 1)
-        self.assertEqual(sources[0].title, "NEFARIOUS RUSSIANS")
-        self.assertEqual(sources[0].feed_url, "https://www.nefariousrussians.com/feed")
+        self.assertEqual(sources[0].title, "Fixture Dispatch")
+        self.assertEqual(sources[0].feed_url, "https://fixture-dispatch.example/feed")
         self.assertEqual(sources[0].kind, "substack")
 
     def test_parse_youtube_channel_html_uses_rss_link(self) -> None:
         source = parse_youtube_channel_html(YOUTUBE_HTML, profile="test-user", group="YouTube", fallback_title="Example Channel")
 
         self.assertEqual(source.title, "Example Channel")
-        self.assertEqual(source.feed_url, "https://www.youtube.com/feeds/videos.xml?channel_id=UCpeHRAz2crCXJNTDYxvIayg")
+        self.assertEqual(source.feed_url, "https://www.youtube.com/feeds/videos.xml?channel_id=UCfixture1234567890")
 
     def test_parse_youtube_takeout_csv(self) -> None:
         csv_text = "Channel Id,Channel Url,Channel Title\nUC12345678901,https://www.youtube.com/channel/UC12345678901,Example Channel\n"
@@ -153,8 +153,8 @@ class SourceImporterTests(unittest.TestCase):
         sources = parse_youtube_subscriptions_html(YOUTUBE_SUBSCRIPTIONS_HTML, profile="test-user", group="YouTube")
 
         self.assertEqual(len(sources), 1)
-        self.assertEqual(sources[0].title, "0 Plays")
-        self.assertEqual(sources[0].site_url, "https://www.youtube.com/@0PlaysRecords")
+        self.assertEqual(sources[0].title, "Fixture Channel")
+        self.assertEqual(sources[0].site_url, "https://www.youtube.com/@fixture-channel")
 
     def test_parse_youtube_plain_list(self) -> None:
         sources = parse_youtube_subscription_lines(
@@ -170,16 +170,16 @@ class SourceImporterTests(unittest.TestCase):
         sources = parse_substack_library_html(SUBSTACK_LIBRARY_HTML, profile="test-user", group="Substack")
 
         self.assertEqual(len(sources), 2)
-        self.assertEqual(sources[0].title, "Do Not Research")
-        self.assertEqual(sources[0].feed_url, "https://donotresearch.substack.com/feed")
-        self.assertEqual(sources[1].feed_url, "https://www.dropsitenews.com/feed")
+        self.assertEqual(sources[0].title, "Fixture Brief")
+        self.assertEqual(sources[0].feed_url, "https://fixture-brief.example/feed")
+        self.assertEqual(sources[1].feed_url, "https://fixture-dispatch.example/feed")
 
     def test_parse_bandcamp_collection_html(self) -> None:
         items = parse_bandcamp_collection_html(BANDCAMP_HTML)
 
         self.assertEqual(len(items), 1)
-        self.assertEqual(items[0].title, "puremess")
-        self.assertEqual(items[0].artist, "luckystrike")
+        self.assertEqual(items[0].title, "fixture-album")
+        self.assertEqual(items[0].artist, "fixture-artist")
         self.assertEqual(items[0].artwork_url, "https://f4.bcbits.com/img/a537894927_10.jpg")
 
     def test_fetch_bandcamp_collection_items_paginates_and_dedupes(self) -> None:
@@ -237,7 +237,7 @@ class SourceImporterTests(unittest.TestCase):
         rss = render_bandcamp_collection_rss("https://bandcamp.com/exampleuser", "Bandcamp: exampleuser", items)
 
         self.assertIn("<title>Bandcamp: exampleuser</title>", rss)
-        self.assertIn("<title>luckystrike - puremess</title>", rss)
+        self.assertIn("<title>fixture-artist - fixture-album</title>", rss)
         self.assertIn("<pubDate>Wed, 17 Jun 2026 17:28:07 +0000</pubDate>", rss)
 
     def test_parse_soundcloud_profile_bits(self) -> None:
@@ -248,9 +248,9 @@ class SourceImporterTests(unittest.TestCase):
     def test_soundcloud_user_source(self) -> None:
         source = soundcloud_user_source(
             {
-                "id": 21305,
-                "username": "The FADER",
-                "permalink_url": "https://soundcloud.com/fadermedia",
+                "id": 999999,
+                "username": "Zorblax Quiver",
+                "permalink_url": "https://soundcloud.com/zorblax-quiver",
             },
             profile="test-user",
             group="SoundCloud",
@@ -259,52 +259,52 @@ class SourceImporterTests(unittest.TestCase):
 
         self.assertIsNotNone(source)
         assert source is not None
-        self.assertEqual(source.id, "soundcloud-the-fader-21305")
-        self.assertEqual(source.title, "SoundCloud: The FADER")
-        self.assertEqual(source.feed_url, "https://feeds.soundcloud.com/users/soundcloud:users:21305/sounds.rss")
-        self.assertEqual(source.site_url, "https://soundcloud.com/fadermedia")
+        self.assertEqual(source.id, "soundcloud-zorblax-quiver-999999")
+        self.assertEqual(source.title, "SoundCloud: Zorblax Quiver")
+        self.assertEqual(source.feed_url, "https://feeds.soundcloud.com/users/soundcloud:users:999999/sounds.rss")
+        self.assertEqual(source.site_url, "https://soundcloud.com/zorblax-quiver")
 
     def test_parse_bandcamp_artist_music_html(self) -> None:
-        items = parse_bandcamp_artist_music_html(BANDCAMP_ARTIST_MUSIC_HTML, "https://enmossed.bandcamp.com")
+        items = parse_bandcamp_artist_music_html(BANDCAMP_ARTIST_MUSIC_HTML, "https://fixture-artist.bandcamp.com")
 
         self.assertEqual(len(items), 1)
-        self.assertEqual(items[0].title, "Campana Sonans")
-        self.assertEqual(items[0].artist, "Jake Muir")
-        self.assertEqual(items[0].url, "https://enmossed.bandcamp.com/album/campana-sonans")
+        self.assertEqual(items[0].title, "Fixture Record")
+        self.assertEqual(items[0].artist, "Fixture Artist")
+        self.assertEqual(items[0].url, "https://fixture-artist.bandcamp.com/album/fixture-record")
         self.assertEqual(items[0].artwork_url, "https://f4.bcbits.com/img/a1463768112_10.jpg")
 
     def test_render_bandcamp_artist_music_rss(self) -> None:
-        items = parse_bandcamp_artist_music_html(BANDCAMP_ARTIST_MUSIC_HTML, "https://enmossed.bandcamp.com")
-        rss = render_bandcamp_collection_rss("https://enmossed.bandcamp.com", "Bandcamp: Enmossed", items)
+        items = parse_bandcamp_artist_music_html(BANDCAMP_ARTIST_MUSIC_HTML, "https://fixture-artist.bandcamp.com")
+        rss = render_bandcamp_collection_rss("https://fixture-artist.bandcamp.com", "Bandcamp: Fixture Artist", items)
 
         self.assertIn('<rss version="2.0">', rss)
-        self.assertIn("<title>Bandcamp: Enmossed</title>", rss)
-        self.assertIn("<title>Jake Muir - Campana Sonans</title>", rss)
-        self.assertIn("<guid isPermaLink=\"true\">https://enmossed.bandcamp.com/album/campana-sonans</guid>", rss)
+        self.assertIn("<title>Bandcamp: Fixture Artist</title>", rss)
+        self.assertIn("<title>Fixture Artist - Fixture Record</title>", rss)
+        self.assertIn("<guid isPermaLink=\"true\">https://fixture-artist.bandcamp.com/album/fixture-record</guid>", rss)
         self.assertIn("&lt;img src=\"https://f4.bcbits.com/img/a1463768112_10.jpg\"", rss)
 
     def test_parse_bandcamp_legacy_artist_music_html(self) -> None:
-        items = parse_bandcamp_artist_music_html(BANDCAMP_LEGACY_ARTIST_MUSIC_HTML, "https://40split.bandcamp.com")
+        items = parse_bandcamp_artist_music_html(BANDCAMP_LEGACY_ARTIST_MUSIC_HTML, "https://fixture-legacy.bandcamp.com")
 
         self.assertEqual(len(items), 1)
-        self.assertEqual(items[0].title, "party ppl")
-        self.assertEqual(items[0].artist, "40split")
+        self.assertEqual(items[0].title, "fixture track")
+        self.assertEqual(items[0].artist, "Fixture Legacy")
         self.assertEqual(items[0].item_type, "track")
-        self.assertEqual(items[0].url, "https://40split.bandcamp.com/track/party-ppl")
+        self.assertEqual(items[0].url, "https://fixture-legacy.bandcamp.com/track/fixture-track")
 
     def test_parse_bandcamp_tralbum_fallback(self) -> None:
-        items = parse_bandcamp_artist_music_html(BANDCAMP_TRALBUM_HTML, "https://kkshucko.bandcamp.com")
+        items = parse_bandcamp_artist_music_html(BANDCAMP_TRALBUM_HTML, "https://fixture-archive.bandcamp.com")
 
         self.assertEqual(len(items), 1)
-        self.assertEqual(items[0].title, "FLASH BLIND")
-        self.assertEqual(items[0].artist, "kk.Shucko")
+        self.assertEqual(items[0].title, "Fixture Album")
+        self.assertEqual(items[0].artist, "Fixture Archive")
         self.assertEqual(items[0].item_type, "album")
         self.assertEqual(items[0].collected_at, "23 Feb 2026 00:33:16 GMT")
 
     def test_title_from_apple_podcast_url(self) -> None:
         self.assertEqual(
-            title_from_url("https://podcasts.apple.com/us/podcast/if-books-could-kill/id1651876897"),
-            "If Books Could Kill",
+            title_from_url("https://podcasts.apple.com/us/podcast/fixture-podcast/id1234567890"),
+            "Fixture Podcast",
         )
 
 

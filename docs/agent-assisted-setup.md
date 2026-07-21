@@ -169,7 +169,11 @@ Skip hosting if every feed is already HTTPS. You need hosting only for generated
 For a fresh Modal setup:
 
 1. Create your Modal account and log in yourself.
-2. Copy `examples/private.env.example` to ignored `data/private.env`.
+2. Create ignored `data/private.env` from the example with owner-only permissions:
+
+   ```bash
+   install -m 600 examples/private.env.example data/private.env
+   ```
 3. Set a unique app, secret, and volume name; set `RSS_PROFILE=me`; point `RSS_SOURCES_FILE` and `RSS_HISTORY_FILE` at your ignored profile files.
 4. Generate a long random `RSS_FEED_TOKEN`; do not reuse it as any other password.
 5. Deploy only after the agent shows the exact deployment command and you approve it.

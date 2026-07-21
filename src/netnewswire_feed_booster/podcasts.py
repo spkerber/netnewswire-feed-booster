@@ -5,7 +5,7 @@ import re
 import xml.etree.ElementTree as ET
 from urllib.parse import urlparse
 
-from .feed_store import Source, slugify
+from .feed_store import Source, source_id_from_title
 from .http_client import fetch_text
 
 
@@ -14,7 +14,7 @@ def podcast_source_from_url(feed_or_url: str, title: str, profile: str, group: s
     if is_apple_podcast_url(value):
         feed_url, resolved_title = resolve_apple_podcast_feed(value)
         return Source(
-            id=slugify(title or resolved_title),
+            id=source_id_from_title(title or resolved_title, feed_url),
             title=title or resolved_title,
             feed_url=feed_url,
             site_url=value,
@@ -26,7 +26,7 @@ def podcast_source_from_url(feed_or_url: str, title: str, profile: str, group: s
 
     resolved_title = title or fetch_feed_title(value) or title_from_url(value)
     return Source(
-        id=slugify(resolved_title),
+        id=source_id_from_title(resolved_title, value),
         title=resolved_title,
         feed_url=value,
         site_url="",

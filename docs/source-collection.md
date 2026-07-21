@@ -52,6 +52,23 @@ PYTHONPATH=src python3 -m netnewswire_feed_booster \
   audit-sources --profile "$RSS_PROFILE" --limit 25
 ```
 
+### Keep Your Own Folder Structure
+
+Imported OPML folders are preserved as an ordered folder path. This project does not prescribe a taxonomy: use no folders, one folder, or as many nested folders as make your reader useful to you.
+
+Source-specific commands start at the OPML root unless you deliberately provide `--group "Your Folder"`. Use `set-folder --private` when the source itself lives in the ignored private overlay.
+
+To move one saved source, provide its exact source ID, site URL, feed URL, or unique title followed by the folder names from top level to leaf:
+
+```bash
+PYTHONPATH=src python3 -m netnewswire_feed_booster \
+  --data "data/sources.${RSS_PROFILE}.json" \
+  set-folder "https://www.nytimes.com" "News" "New York Times" \
+  --profile "$RSS_PROFILE"
+```
+
+Omit folder names to place a source at the OPML root. Re-export after a folder change. A source appears in exactly one location in the generated OPML.
+
 ## YouTube
 
 YouTube has official RSS feeds per channel. A channel handle such as `@example` is not the durable feed identifier, so the tool resolves and stores the stable channel ID.

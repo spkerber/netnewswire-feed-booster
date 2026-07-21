@@ -14,6 +14,7 @@ def build_bandcamp_source_from_url(
     profile: str,
     source_type: str,
     out_dir: Path,
+    group: str = "",
 ) -> Source:
     site_url = normalize_url(url).rstrip("/")
     parsed = urlparse(site_url)
@@ -49,7 +50,7 @@ def build_bandcamp_source_from_url(
         site_url=site_url + ("/" if not is_fan and not url.endswith("/") else ""),
         kind="bandcamp",
         profiles=[profile],
-        groups=["Bandcamp"],
+        groups=[group] if group.strip() else [],
         status="active",
         source="bandcamp-local-generated",
         notes="Generated local RSS feed from the saved Bandcamp source page because OpenRSS did not mirror this Bandcamp feed reliably.",

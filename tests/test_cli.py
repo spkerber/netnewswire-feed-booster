@@ -21,6 +21,159 @@ EMPTY_NETNEWSWIRE_OPML = """<?xml version="1.0" encoding="UTF-8"?>
 
 
 class CliTests(unittest.TestCase):
+    def test_non_ascii_titles_do_not_collide_in_manual_or_youtube_adds(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            data_path = Path(tmp_dir) / "sources.json"
+
+            with redirect_stdout(io.StringIO()):
+                main(
+                    [
+                        "--data",
+                        str(data_path),
+                        "add",
+                        "--title",
+                        "\u03a9\u03bc\u03ad\u03b3\u03b1 \u03a3\u03ae\u03bc\u03b1",
+                        "--feed-url",
+                        "https://feeds.example.com/one.rss",
+                    ]
+                )
+                main(
+                    [
+                        "--data",
+                        str(data_path),
+                        "add",
+                        "--title",
+                        "\ud14c\uc2a4\ud2b8 \uc2e0\ud638",
+                        "--feed-url",
+                        "https://feeds.example.com/two.rss",
+                    ]
+                )
+                main(
+                    [
+                        "--data",
+                        str(data_path),
+                        "subscribe-youtube",
+                        "UCfirst",
+                        "--title",
+                        "\u0625\u0634\u0627\u0631\u0629 \u062a\u062c\u0631\u064a\u0628\u064a\u0629",
+                    ]
+                )
+                main(
+                    [
+                        "--data",
+                        str(data_path),
+                        "subscribe-youtube",
+                        "UCsecond",
+                        "--title",
+                        "\ud14c\uc2a4\ud2b8 \uc2e0\ud638",
+                    ]
+                )
+
+            sources = FeedStore(data_path).sources()
+
+        self.assertEqual(len(sources), 4)
+        self.assertEqual(len({source.id for source in sources}), 4)
+        self.assertTrue(all(source.id.startswith("source-") for source in sources))
+        self.assertEqual(
+            {source.feed_url for source in sources},
+            {
+                "https://feeds.example.com/one.rss",
+                "https://feeds.example.com/two.rss",
+                "https://www.youtube.com/feeds/videos.xml?channel_id=UCfirst",
+                "https://www.youtube.com/feeds/videos.xml?channel_id=UCsecond",
+            },
+        )
+
+    def test_non_ascii_title_ids_do_not_expose_feed_url_tokens(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            data_path = Path(tmp_dir) / "sources.json"
+            with redirect_stdout(io.StringIO()):
+                main(
+                    [
+                        "--data",
+                        str(data_path),
+                        "add",
+                        "--title",
+                        "\u0e2a\u0e31\u0e0d\u0e0d\u0e32\u0e13",
+                        "--feed-url",
+                        "https://example.modal.run/feeds/private-token/generated/source.rss",
+                    ]
+                )
+
+            source = FeedStore(data_path).sources()[0]
+
+        self.assertTrue(source.id.startswith("source-"))
+        self.assertNotIn("private-token", source.id)
+
+    def test_source_specific_commands_only_use_an_explicit_folder(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            data_path = Path(tmp_dir) / "sources.json"
+
+            with redirect_stdout(io.StringIO()):
+                main(
+                    [
+                        "--data",
+                        str(data_path),
+                        "subscribe-youtube",
+                        "UCroot",
+                        "--title",
+                        "Root Feed",
+                    ]
+                )
+                main(
+                    [
+                        "--data",
+                        str(data_path),
+                        "subscribe-youtube",
+                        "UCfolder",
+                        "--title",
+                        "Folder Feed",
+                        "--group",
+                        "My Video Folder",
+                    ]
+                )
+
+            sources = {source.id: source for source in FeedStore(data_path).sources()}
+
+        self.assertEqual(sources["root-feed"].groups, [])
+        self.assertEqual(sources["folder-feed"].groups, ["My Video Folder"])
+
+    def test_readding_legacy_source_id_migrates_to_a_stable_id(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            data_path = Path(tmp_dir) / "sources.json"
+            store = FeedStore(data_path)
+            store.add_or_update(Source(id="source", title="Old", feed_url="https://feeds.example.com/source.rss"))
+            store.add_or_update(Source(id="source-123", title="New", feed_url="https://feeds.example.com/source.rss"))
+
+            source = store.source_by_id("source-123")
+
+        self.assertIsNotNone(source)
+        self.assertEqual(source.title, "New")
+
+    def test_set_folder_sets_a_nested_path_and_can_clear_it(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            data_path = Path(tmp_dir) / "sources.json"
+            store = FeedStore(data_path)
+            store.add_or_update(
+                Source(
+                    id="example",
+                    title="Example",
+                    feed_url="https://example.com/feed.xml",
+                    profiles=["test-user"],
+                    groups=["Old Folder"],
+                )
+            )
+            store.save()
+
+            with redirect_stdout(io.StringIO()):
+                main(["--data", str(data_path), "set-folder", "example", "News", "Example Publisher", "--profile", "test-user"])
+                main(["--data", str(data_path), "set-folder", "example", "--profile", "test-user"])
+
+            source = FeedStore(data_path).source_by_id("example")
+
+        self.assertIsNotNone(source)
+        self.assertEqual(source.groups, [])
+
     def test_import_opml_uses_bulk_store_merge(self) -> None:
         with TemporaryDirectory() as tmp_dir:
             data_path = Path(tmp_dir) / "sources.json"
@@ -54,9 +207,9 @@ class CliTests(unittest.TestCase):
                 main(
                     [
                         "subscribe-substack",
-                        "oneusefulthing.substack.com",
+                        "fixture-letter.example",
                         "--title",
-                        "One Useful Thing",
+                        "Fixture Letter",
                         "--profile",
                         "fresh",
                     ]
@@ -64,7 +217,7 @@ class CliTests(unittest.TestCase):
 
             default_data.assert_called_once_with("fresh")
             default_history.assert_called_once_with("fresh")
-            self.assertIsNotNone(FeedStore(data_path).source_by_id("one-useful-thing"))
+            self.assertIsNotNone(FeedStore(data_path).source_by_id("fixture-letter"))
 
     def test_list_redacts_feed_urls_unless_explicitly_requested(self) -> None:
         with TemporaryDirectory() as tmp_dir:
@@ -106,9 +259,9 @@ class CliTests(unittest.TestCase):
                         "--history",
                         str(history_path),
                         "subscribe-substack",
-                        "oneusefulthing.substack.com",
+                        "fixture-letter.example",
                         "--title",
-                        "One Useful Thing",
+                        "Fixture Letter",
                     ]
                 )
                 main(
@@ -118,7 +271,7 @@ class CliTests(unittest.TestCase):
                         "--history",
                         str(history_path),
                         "set-status",
-                        "one-useful-thing",
+                        "fixture-letter",
                         "--status",
                         "unsubscribed",
                         "--reason",
@@ -182,10 +335,10 @@ class CliTests(unittest.TestCase):
             store = FeedStore(data_path)
             store.add_or_update(
                 Source(
-                    id="bandcamp-ghost-dubs",
-                    title="Bandcamp: Ghost Dubs",
-                    feed_url="file:///tmp/bandcamp-ghost-dubs.rss",
-                    site_url="https://ghostdubs.bandcamp.com/",
+                    id="bandcamp-fixture-artist",
+                    title="Bandcamp: Fixture Artist",
+                    feed_url="file:///tmp/bandcamp-fixture-artist.rss",
+                    site_url="https://fixture-artist.bandcamp.com/",
                     kind="bandcamp",
                     profiles=["test-user"],
                     groups=["Bandcamp Artists"],
@@ -212,8 +365,8 @@ class CliTests(unittest.TestCase):
 
             rendered = out_path.read_text(encoding="utf-8")
 
-        self.assertIn("https://example.modal.run/feeds/secret-token/bandcamp/bandcamp-ghost-dubs.rss", rendered)
-        self.assertIn('htmlUrl="https://ghostdubs.bandcamp.com/"', rendered)
+        self.assertIn("https://example.modal.run/feeds/secret-token/bandcamp/bandcamp-fixture-artist.rss", rendered)
+        self.assertIn('htmlUrl="https://fixture-artist.bandcamp.com/"', rendered)
 
     def test_export_opml_requires_token_with_hosted_base(self) -> None:
         with TemporaryDirectory() as tmp_dir:
@@ -222,10 +375,10 @@ class CliTests(unittest.TestCase):
             store = FeedStore(data_path)
             store.add_or_update(
                 Source(
-                    id="bandcamp-ghost-dubs",
-                    title="Bandcamp: Ghost Dubs",
-                    feed_url="file:///tmp/bandcamp-ghost-dubs.rss",
-                    site_url="https://ghostdubs.bandcamp.com/",
+                    id="bandcamp-fixture-artist",
+                    title="Bandcamp: Fixture Artist",
+                    feed_url="file:///tmp/bandcamp-fixture-artist.rss",
+                    site_url="https://fixture-artist.bandcamp.com/",
                     kind="bandcamp",
                     profiles=["test-user"],
                     groups=["Bandcamp Artists"],
@@ -261,10 +414,10 @@ class CliTests(unittest.TestCase):
             expected_path = Path(tmp_dir) / "expected.opml"
             sources = [
                 Source(
-                    id="bandcamp-ghost-dubs",
-                    title="Bandcamp: Ghost Dubs",
-                    feed_url="https://example.modal.run/feeds/secret-token/bandcamp/bandcamp-ghost-dubs.rss",
-                    site_url="https://ghostdubs.bandcamp.com/",
+                    id="bandcamp-fixture-artist",
+                    title="Bandcamp: Fixture Artist",
+                    feed_url="https://example.modal.run/feeds/secret-token/bandcamp/bandcamp-fixture-artist.rss",
+                    site_url="https://fixture-artist.bandcamp.com/",
                     kind="bandcamp",
                     profiles=["test-user"],
                     groups=["Bandcamp Artists"],
@@ -311,19 +464,19 @@ class CliTests(unittest.TestCase):
             store.save()
             expected_sources = [
                 Source(
-                    id="bandcamp-ghost-dubs",
-                    title="Bandcamp: Ghost Dubs",
-                    feed_url="https://example.modal.run/feeds/secret-token/bandcamp/bandcamp-ghost-dubs.rss",
-                    site_url="https://ghostdubs.bandcamp.com/",
+                    id="bandcamp-fixture-artist",
+                    title="Bandcamp: Fixture Artist",
+                    feed_url="https://example.modal.run/feeds/secret-token/bandcamp/bandcamp-fixture-artist.rss",
+                    site_url="https://fixture-artist.bandcamp.com/",
                     kind="bandcamp",
                     profiles=["test-user"],
                     groups=["Bandcamp Artists"],
                 ),
                 Source(
-                    id="nts-nkisi",
-                    title="NTS: NKISI",
-                    feed_url="https://example.modal.run/feeds/secret-token/generated/nts-nkisi.rss",
-                    site_url="https://www.nts.live/shows/nkisi",
+                    id="nts-fixture-signal",
+                    title="NTS: Fixture Signal",
+                    feed_url="https://example.modal.run/feeds/secret-token/generated/nts-fixture-signal.rss",
+                    site_url="https://www.nts.live/shows/fixture-signal",
                     kind="other",
                     profiles=["test-user"],
                     groups=["NTS"],
@@ -439,8 +592,8 @@ class CliTests(unittest.TestCase):
 
     def test_subscribe_bandcamp_source_adds_artist_and_local_rss(self) -> None:
         artist_html = '''
-        <meta property="og:site_name" content="Ghost Dubs">
-        <ol id="music-grid" data-client-items="[{&quot;art_id&quot;:1463768112,&quot;artist&quot;:&quot;Ghost Dubs&quot;,&quot;page_url&quot;:&quot;/album/damaged&quot;,&quot;title&quot;:&quot;Damaged&quot;,&quot;type&quot;:&quot;album&quot;}]"></ol>
+        <meta property="og:site_name" content="Fixture Artist">
+        <ol id="music-grid" data-client-items="[{&quot;art_id&quot;:1463768112,&quot;artist&quot;:&quot;Fixture Artist&quot;,&quot;page_url&quot;:&quot;/album/fixture-record&quot;,&quot;title&quot;:&quot;Fixture Record&quot;,&quot;type&quot;:&quot;album&quot;}]"></ol>
         '''
         with TemporaryDirectory() as tmp_dir:
             data_path = Path(tmp_dir) / "sources.json"
@@ -454,25 +607,77 @@ class CliTests(unittest.TestCase):
                                 "--data",
                                 str(data_path),
                                 "subscribe-bandcamp-source",
-                                "https://ghostdubs.bandcamp.com/",
+                                "https://fixture-artist.bandcamp.com/",
+                                "--group",
+                                "Music",
                                 "--out-dir",
                                 str(out_dir),
                             ]
                         )
 
-            source = FeedStore(data_path).source_by_id("bandcamp-ghost-dubs")
-            rss_path = out_dir / "bandcamp-ghost-dubs.rss"
+            source = FeedStore(data_path).source_by_id("bandcamp-fixture-artist")
+            rss_path = out_dir / "bandcamp-fixture-artist.rss"
             rss_exists = rss_path.exists()
 
         self.assertIsNotNone(source)
-        self.assertEqual(source.groups, ["Bandcamp"])
+        self.assertEqual(source.groups, ["Music"])
         self.assertTrue(rss_exists)
+
+    def test_set_folder_updates_private_overlay_only_when_requested(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            data_path = Path(tmp_dir) / "sources.json"
+            private_data_path = Path(tmp_dir) / "private-sources.json"
+            private_store = FeedStore(private_data_path)
+            private_store.add_or_update(
+                Source(
+                    id="private-source",
+                    title="Private Source",
+                    feed_url="https://example.com/private.xml",
+                    profiles=["test-user"],
+                )
+            )
+            private_store.save()
+
+            with redirect_stdout(io.StringIO()):
+                main(
+                    [
+                        "--data",
+                        str(data_path),
+                        "--private-data",
+                        str(private_data_path),
+                        "set-folder",
+                        "private-source",
+                        "Private Folder",
+                        "--profile",
+                        "test-user",
+                        "--private",
+                    ]
+                )
+
+            public_source = FeedStore(data_path).source_by_id("private-source")
+            private_source = FeedStore(private_data_path).source_by_id("private-source")
+
+        self.assertIsNone(public_source)
+        self.assertIsNotNone(private_source)
+        self.assertEqual(private_source.groups, ["Private Folder"])
 
     def test_discover_feed_prints_alternate_feed_url(self) -> None:
         output = io.StringIO()
-        with patch("netnewswire_feed_booster.cli.discover_feed_url", return_value="https://example.com/feed.xml"):
-            with redirect_stdout(output):
-                result = main(["discover-feed", "https://example.com"])
+        with TemporaryDirectory() as tmp_dir:
+            data_path = Path(tmp_dir) / "sources.json"
+            private_data_path = Path(tmp_dir) / "private-sources.json"
+            with patch("netnewswire_feed_booster.cli.discover_feed_url", return_value="https://example.com/feed.xml"):
+                with redirect_stdout(output):
+                    result = main(
+                        [
+                            "--data",
+                            str(data_path),
+                            "--private-data",
+                            str(private_data_path),
+                            "discover-feed",
+                            "https://example.com",
+                        ]
+                    )
 
         self.assertEqual(result, 0)
         self.assertEqual(output.getvalue().strip(), "https://example.com/feed.xml")
@@ -535,10 +740,10 @@ class CliTests(unittest.TestCase):
             )
             store.add_or_update(
                 Source(
-                    id="radio-hydefm-archives",
-                    title="HydeFM Archives",
-                    feed_url="file:///old/radio-hydefm-archives.rss",
-                    site_url="https://hydefm.com/archives/",
+                    id="radio-fixture-archives",
+                    title="Fixture Radio Archives",
+                    feed_url="file:///old/radio-fixture-archives.rss",
+                    site_url="https://radio.example/archives/",
                     kind="other",
                     profiles=["trial"],
                     groups=["HydeFM"],
@@ -578,7 +783,7 @@ class CliTests(unittest.TestCase):
 
             refreshed = FeedStore(data_path)
             nts_rss = (out_dir / "nts-example.rss").read_text(encoding="utf-8")
-            hydefm_rss = (out_dir / "radio-hydefm-archives.rss").read_text(encoding="utf-8")
+            hydefm_rss = (out_dir / "radio-fixture-archives.rss").read_text(encoding="utf-8")
 
         self.assertEqual(result, 0)
         self.assertEqual(nts_rss, "<rss>nts</rss>")
