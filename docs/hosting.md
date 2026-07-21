@@ -35,10 +35,10 @@ python3 -m venv .venv-modal
 3. Run `./scripts/bootstrap_profile.sh me` first. The hosted workflow refuses tracked starter data and requires private profile files.
 
 ```bash
-cp examples/private.env.example data/private.env
+install -m 600 examples/private.env.example data/private.env
 ```
 
-Set `RSS_PROFILE`, `RSS_SOURCES_FILE`, `RSS_HISTORY_FILE`, `RSS_FEED_TOKEN`, and unique `MODAL_*` names. Keep the three profile settings aligned, for example `RSS_PROFILE=me`, `RSS_SOURCES_FILE=data/sources.me.json`, and `RSS_HISTORY_FILE=data/subscription-history.me.json`. Leave `RSS_FEED_BASE` as a placeholder until Modal deploy prints the HTTPS endpoint. The `MODAL_*` values are only for the Modal deployment path; other hosts should use equivalent provider configuration while preserving `RSS_FEED_BASE` and `RSS_FEED_TOKEN`.
+The tracked example contains placeholders and can remain readable in a public clone. Your copied `data/private.env` holds a real token, so the command creates it with owner-only (`0600`) permissions. Set `RSS_PROFILE`, `RSS_SOURCES_FILE`, `RSS_HISTORY_FILE`, `RSS_FEED_TOKEN`, and unique `MODAL_*` names. Keep the three profile settings aligned, for example `RSS_PROFILE=me`, `RSS_SOURCES_FILE=data/sources.me.json`, and `RSS_HISTORY_FILE=data/subscription-history.me.json`. Leave `RSS_FEED_BASE` as a placeholder until Modal deploy prints the HTTPS endpoint. The `MODAL_*` values are only for the Modal deployment path; other hosts should use equivalent provider configuration while preserving `RSS_FEED_BASE` and `RSS_FEED_TOKEN`.
 
 ```bash
 ./scripts/netnewswire_workflow.sh deploy-modal

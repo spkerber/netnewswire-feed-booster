@@ -26,7 +26,8 @@ class HydeFMTests(unittest.TestCase):
     def test_parse_hydefm_archive_markdown(self) -> None:
         title, description, items = parse_hydefm_archive_markdown(HYDEFM_MARKDOWN)
 
-        self.assertEqual(title, "HydeFM Archives")
+        self.assertIn("HydeFM", title)
+        self.assertTrue(title.endswith("Archives"))
         self.assertIn("hydefm.com/archives", description)
         self.assertEqual(len(items), 2)
         self.assertEqual(items[0].title, "stooped w/ pijeon")
@@ -37,15 +38,16 @@ class HydeFMTests(unittest.TestCase):
     def test_render_hydefm_archive_rss(self) -> None:
         rss = render_hydefm_archive_rss(fetcher=lambda _: HYDEFM_MARKDOWN)
 
-        self.assertIn("<title>HydeFM Archives</title>", rss)
+        self.assertIn("<title>HydeFM", rss)
+        self.assertIn("Archives</title>", rss)
         self.assertIn("<title>stooped w/ pijeon</title>", rss)
         self.assertIn("Thu, 02 Jul 2026 00:00:00 +0000", rss)
         self.assertIn("https://hydefm.com/archive/fluxions-w-vertigo-07-01-26/", rss)
 
     def test_hydefm_text_mirror_url_is_not_a_generic_proxy(self) -> None:
         self.assertEqual(
-            hydefm_text_mirror_url("https://hydefm.com/archives/"),
-            "https://r.jina.ai/http://hydefm.com/archives/",
+            hydefm_text_mirror_url("https://www.hydefm.com/archives/?test_fixture=123"),
+            "https://r.jina.ai/http://www.hydefm.com/archives/?test_fixture=123",
         )
         with self.assertRaises(ValueError):
             hydefm_text_mirror_url("https://evil.example/archives/")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import dataclass, field
@@ -11,10 +12,6 @@ from typing import Any, Dict, Iterable, List, Optional
 
 VALID_STATUSES = {"active", "candidate", "paused", "unsubscribed"}
 VALID_KINDS = {"website", "substack", "youtube", "bandcamp", "newsletter", "podcast", "other"}
-BANDCAMP_GROUP = "Bandcamp"
-BANDCAMP_GROUP_ALIASES = {"bandcamp", "bandcamp artists", "bandcamp fans"}
-
-
 def repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
@@ -45,6 +42,15 @@ def slugify(value: str) -> str:
     value = re.sub(r"[^a-z0-9]+", "-", value)
     value = value.strip("-")
     return value or "source"
+
+
+def source_id_from_title(title: str, stable_value: str) -> str:
+    """Return a readable ID without exposing a URL when a title is non-ASCII-only."""
+    source_id = slugify(title)
+    if source_id != "source":
+        return source_id
+    digest = hashlib.sha256(stable_value.encode("utf-8")).hexdigest()[:12]
+    return f"source-{digest}"
 
 
 def normalize_url(value: str) -> str:
@@ -79,7 +85,7 @@ class Source:
             "site_url": self.site_url,
             "kind": self.kind,
             "profiles": sorted(set(self.profiles)),
-            "groups": sorted(set(normalized_groups)),
+            "groups": normalized_groups,
             "status": self.status,
             "tags": sorted(set(self.tags)),
             "notes": self.notes,
@@ -153,12 +159,14 @@ class FeedStore:
         sources = self.sources()
         existing = next((item for item in sources if item.id == source.id or item.feed_url == source.feed_url), None)
         if existing:
+            if existing.id == "source" and source.id != "source":
+                existing.id = source.id
             existing.title = source.title or existing.title
             existing.feed_url = source.feed_url or existing.feed_url
             existing.site_url = source.site_url or existing.site_url
             existing.kind = source.kind or existing.kind
             existing.profiles = sorted(set(existing.profiles + source.profiles))
-            existing.groups = normalize_groups_for_source(existing, extra_groups=source.groups)
+            existing.groups = source.groups or existing.groups
             existing.tags = sorted(set(existing.tags + source.tags))
             existing.notes = source.notes or existing.notes
             existing.source = existing.source if existing.source != "manual" else source.source
@@ -189,7 +197,7 @@ class FeedStore:
                 existing.site_url = source.site_url or existing.site_url
                 existing.kind = source.kind or existing.kind
                 existing.profiles = sorted(set(existing.profiles + source.profiles))
-                existing.groups = normalize_groups_for_source(existing, extra_groups=source.groups)
+                existing.groups = source.groups or existing.groups
                 existing.tags = sorted(set(existing.tags + source.tags))
                 existing.notes = source.notes or existing.notes
                 existing.source = existing.source if existing.source != "manual" else source.source
@@ -212,6 +220,15 @@ class FeedStore:
             if source.id == source_id:
                 source.status = status
                 source.last_reviewed_at = today_iso()
+                self.data["sources"] = [item.to_dict() for item in sources]
+                return source
+        raise KeyError(f"No source found with id '{source_id}'")
+
+    def set_folder_path(self, source_id: str, folder_path: List[str]) -> Source:
+        sources = self.sources()
+        for source in sources:
+            if source.id == source_id:
+                source.groups = normalize_groups_for_source(source, folder_path=folder_path)
                 self.data["sources"] = [item.to_dict() for item in sources]
                 return source
         raise KeyError(f"No source found with id '{source_id}'")
@@ -252,24 +269,12 @@ def unique_id(base_id: str, existing_ids: Iterable[str]) -> str:
     return f"{base_id}-{counter}"
 
 
-def normalize_groups_for_source(source: Source, extra_groups: Optional[List[str]] = None) -> List[str]:
-    if source.kind == "bandcamp":
-        return [BANDCAMP_GROUP]
-
-    groups = list(source.groups)
-    if extra_groups:
-        groups.extend(extra_groups)
-
+def normalize_groups_for_source(source: Source, folder_path: Optional[List[str]] = None) -> List[str]:
+    """Normalize one ordered OPML folder path without imposing a taxonomy."""
     normalized: List[str] = []
-    seen: set[str] = set()
-    for group in groups:
+    for group in folder_path if folder_path is not None else source.groups:
         cleaned = group.strip()
         if not cleaned:
             continue
-        if cleaned.lower() in BANDCAMP_GROUP_ALIASES:
-            cleaned = BANDCAMP_GROUP
-        key = cleaned.lower()
-        if key not in seen:
-            normalized.append(cleaned)
-            seen.add(key)
+        normalized.append(cleaned)
     return normalized

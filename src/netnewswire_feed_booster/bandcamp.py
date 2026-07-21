@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Callable, List
 from urllib.parse import urljoin
 
-from .feed_store import Source, slugify
+from .feed_store import Source, source_id_from_title
 from .rss_safety import html_text, image_html
 
 
@@ -272,7 +272,7 @@ def extract_bandcamp_pagedata(html: str) -> dict:
 
 def bandcamp_source(profile_url: str, feed_path: Path, title: str, profile: str, group: str) -> Source:
     return Source(
-        id=slugify(title),
+        id=source_id_from_title(title, profile_url),
         title=title,
         feed_url=feed_path.resolve().as_uri(),
         site_url=profile_url.rstrip("/"),

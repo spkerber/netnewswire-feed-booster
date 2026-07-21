@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import html
 import xml.etree.ElementTree as ET
-from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Iterable, List, Tuple
 
-from .feed_store import Source, slugify
+from .feed_store import Source, source_id_from_title
 
 
 def parse_opml(path: Path, profile: str) -> List[Source]:
@@ -39,7 +38,7 @@ def _walk_outlines(element: ET.Element, groups: List[str]) -> Iterable[Tuple[Sou
             kind = infer_kind(feed_url, site_url)
             yield (
                 Source(
-                    id=slugify(title or feed_url),
+                    id=source_id_from_title(title, feed_url),
                     title=title,
                     feed_url=feed_url,
                     site_url=site_url,
@@ -65,11 +64,15 @@ def infer_kind(feed_url: str, site_url: str = "") -> str:
 
 
 def render_opml(sources: Iterable[Source], title: str = "netnewswire-feed-booster") -> str:
-    grouped: Dict[str, List[Source]] = defaultdict(list)
+    folders: Dict[str, Dict] = {}
     ungrouped: List[Source] = []
     for source in sorted(sources, key=lambda item: item.title.lower()):
         if source.groups:
-            grouped[source.groups[0]].append(source)
+            node = folders
+            for folder_name in source.groups:
+                current = node.setdefault(folder_name, {"folders": {}, "sources": []})
+                node = current["folders"]
+            current["sources"].append(source)
         else:
             ungrouped.append(source)
 
@@ -84,11 +87,7 @@ def render_opml(sources: Iterable[Source], title: str = "netnewswire-feed-booste
         "  <body>",
     ]
 
-    for group_name in sorted(grouped.keys(), key=str.lower):
-        lines.append(f'    <outline text="{_x(group_name)}" title="{_x(group_name)}">')
-        for source in grouped[group_name]:
-            lines.append(_source_outline(source, indent="      "))
-        lines.append("    </outline>")
+    lines.extend(_render_folder_tree(folders, indent="    "))
 
     for source in ungrouped:
         lines.append(_source_outline(source, indent="    "))
@@ -113,6 +112,18 @@ def _source_outline(source: Source, indent: str) -> str:
         attrs["htmlUrl"] = source.site_url
     rendered = " ".join(f'{key}="{_x(value)}"' for key, value in attrs.items())
     return f"{indent}<outline {rendered}/>"
+
+
+def _render_folder_tree(folders: Dict[str, Dict], indent: str) -> List[str]:
+    lines: List[str] = []
+    for folder_name in sorted(folders, key=str.lower):
+        node = folders[folder_name]
+        lines.append(f'{indent}<outline text="{_x(folder_name)}" title="{_x(folder_name)}">')
+        lines.extend(_render_folder_tree(node["folders"], indent + "  "))
+        for source in sorted(node["sources"], key=lambda item: item.title.lower()):
+            lines.append(_source_outline(source, indent=indent + "  "))
+        lines.append(f"{indent}</outline>")
+    return lines
 
 
 def _x(value: str) -> str:

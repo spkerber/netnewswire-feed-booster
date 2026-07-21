@@ -194,10 +194,10 @@ class GeneratedSourceMigrationTests(unittest.TestCase):
             reference = FeedStore(root / "sources.old.json")
             reference.add_or_update(
                 Source(
-                    id="radio-hydefm-archives",
-                    title="HydeFM Archives",
-                    feed_url="file:///old/radio-hydefm-archives.rss",
-                    site_url="https://hydefm.com/archives/",
+                    id="radio-fixture-archives",
+                    title="Fixture Radio Archives",
+                    feed_url="file:///old/radio-fixture-archives.rss",
+                    site_url="https://radio.example/archives/",
                     kind="other",
                     profiles=["old"],
                     groups=["HydeFM"],
@@ -209,10 +209,10 @@ class GeneratedSourceMigrationTests(unittest.TestCase):
             target = FeedStore(root / "sources.trial.json")
             target.add_or_update(
                 Source(
-                    id="hydefm-archives",
-                    title="HydeFM Archives",
-                    feed_url="https://old-host.example/feeds/old-token/generated/hydefm-archives.rss",
-                    site_url="https://hydefm.com/archives/",
+                    id="fixture-archives",
+                    title="Fixture Radio Archives",
+                    feed_url="https://old-host.example/feeds/old-token/generated/fixture-archives.rss",
+                    site_url="https://radio.example/archives/",
                     profiles=["trial"],
                     groups=["HydeFM"],
                     source="netnewswire-import",
@@ -230,6 +230,6 @@ class GeneratedSourceMigrationTests(unittest.TestCase):
             apply_generated_source_migration(target, migration)
             rebuilt = FeedStore(root / "sources.trial.json")
 
-        self.assertEqual(list(migration.replacements), ["hydefm-archives"])
-        self.assertIsNone(rebuilt.source_by_id("hydefm-archives"))
-        self.assertIsNotNone(rebuilt.source_by_id("radio-hydefm-archives"))
+        self.assertEqual(list(migration.replacements), ["fixture-archives"])
+        self.assertIsNone(rebuilt.source_by_id("fixture-archives"))
+        self.assertIsNotNone(rebuilt.source_by_id("radio-fixture-archives"))

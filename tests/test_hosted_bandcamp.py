@@ -10,38 +10,38 @@ from netnewswire_feed_booster.hosted_bandcamp import (
 
 
 BANDCAMP_ARTIST_MUSIC_HTML = '''
-<ol id="music-grid" data-client-items="[{&quot;art_id&quot;:1463768112,&quot;artist&quot;:&quot;Ghost Dubs&quot;,&quot;band_id&quot;:1601512585,&quot;id&quot;:2261764695,&quot;page_url&quot;:&quot;/album/damaged&quot;,&quot;title&quot;:&quot;Damaged&quot;,&quot;type&quot;:&quot;album&quot;}]"></ol>
+<ol id="music-grid" data-client-items="[{&quot;art_id&quot;:1463768112,&quot;artist&quot;:&quot;Fixture Artist&quot;,&quot;band_id&quot;:1601512585,&quot;id&quot;:2261764695,&quot;page_url&quot;:&quot;/album/fixture-record&quot;,&quot;title&quot;:&quot;Fixture Record&quot;,&quot;type&quot;:&quot;album&quot;}]"></ol>
 '''
 
 
 class HostedBandcampTests(unittest.TestCase):
     def test_hosted_bandcamp_feed_url(self) -> None:
         self.assertEqual(
-            hosted_bandcamp_feed_url("https://example.modal.run/", "bandcamp-ghost-dubs", token="secret-token"),
-            "https://example.modal.run/feeds/secret-token/bandcamp/bandcamp-ghost-dubs.rss",
+            hosted_bandcamp_feed_url("https://example.modal.run/", "bandcamp-fixture-artist", token="secret-token"),
+            "https://example.modal.run/feeds/secret-token/bandcamp/bandcamp-fixture-artist.rss",
         )
 
     def test_hosted_bandcamp_feed_url_requires_token(self) -> None:
         with self.assertRaisesRegex(ValueError, "require a token"):
-            hosted_bandcamp_feed_url("https://example.modal.run/", "bandcamp-ghost-dubs")
+            hosted_bandcamp_feed_url("https://example.modal.run/", "bandcamp-fixture-artist")
 
     def test_hosted_generated_feed_url(self) -> None:
         self.assertEqual(
-            hosted_generated_feed_url("https://example.modal.run/", "nts-nkisi", token="secret-token"),
-            "https://example.modal.run/feeds/secret-token/generated/nts-nkisi.rss",
+            hosted_generated_feed_url("https://example.modal.run/", "nts-fixture-signal", token="secret-token"),
+            "https://example.modal.run/feeds/secret-token/generated/nts-fixture-signal.rss",
         )
 
     def test_hosted_generated_feed_url_requires_token(self) -> None:
         with self.assertRaisesRegex(ValueError, "require a token"):
-            hosted_generated_feed_url("https://example.modal.run/", "nts-nkisi")
+            hosted_generated_feed_url("https://example.modal.run/", "nts-fixture-signal")
 
     def test_sources_with_hosted_bandcamp_feeds_rewrites_only_bandcamp(self) -> None:
         sources = [
             Source(
-                id="bandcamp-ghost-dubs",
-                title="Bandcamp: Ghost Dubs",
-                feed_url="file:///tmp/bandcamp-ghost-dubs.rss",
-                site_url="https://ghostdubs.bandcamp.com/",
+                id="bandcamp-fixture-artist",
+                title="Bandcamp: Fixture Artist",
+                feed_url="file:///tmp/bandcamp-fixture-artist.rss",
+                site_url="https://fixture-artist.bandcamp.com/",
                 kind="bandcamp",
             ),
             Source(
@@ -51,10 +51,10 @@ class HostedBandcampTests(unittest.TestCase):
                 kind="website",
             ),
             Source(
-                id="nts-nkisi",
-                title="NTS: NKISI",
-                feed_url="file:///tmp/nts-nkisi.rss",
-                site_url="https://www.nts.live/shows/nkisi",
+                id="nts-fixture-signal",
+                title="NTS: Fixture Signal",
+                feed_url="file:///tmp/nts-fixture-signal.rss",
+                site_url="https://www.nts.live/shows/fixture-signal",
                 kind="other",
                 source="nts-local-generated",
             ),
@@ -64,22 +64,22 @@ class HostedBandcampTests(unittest.TestCase):
 
         self.assertEqual(
             rewritten[0].feed_url,
-            "https://example.modal.run/feeds/secret-token/bandcamp/bandcamp-ghost-dubs.rss",
+            "https://example.modal.run/feeds/secret-token/bandcamp/bandcamp-fixture-artist.rss",
         )
-        self.assertEqual(rewritten[0].site_url, "https://ghostdubs.bandcamp.com/")
+        self.assertEqual(rewritten[0].site_url, "https://fixture-artist.bandcamp.com/")
         self.assertEqual(rewritten[1].feed_url, "https://example.com/feed")
         self.assertEqual(
             rewritten[2].feed_url,
-            "https://example.modal.run/feeds/secret-token/generated/nts-nkisi.rss",
+            "https://example.modal.run/feeds/secret-token/generated/nts-fixture-signal.rss",
         )
 
     def test_render_bandcamp_source_rss_uses_artist_music_url(self) -> None:
         fetched_urls = []
         source = Source(
-            id="bandcamp-ghost-dubs",
-            title="Bandcamp: Ghost Dubs",
-            feed_url="file:///tmp/bandcamp-ghost-dubs.rss",
-            site_url="https://ghostdubs.bandcamp.com/",
+            id="bandcamp-fixture-artist",
+            title="Bandcamp: Fixture Artist",
+            feed_url="file:///tmp/bandcamp-fixture-artist.rss",
+            site_url="https://fixture-artist.bandcamp.com/",
             kind="bandcamp",
             groups=["Bandcamp Artists"],
         )
@@ -90,9 +90,9 @@ class HostedBandcampTests(unittest.TestCase):
 
         rss = render_bandcamp_source_rss(source, fetcher=fetcher)
 
-        self.assertEqual(fetched_urls, ["https://ghostdubs.bandcamp.com/music"])
-        self.assertIn("<title>Bandcamp: Ghost Dubs</title>", rss)
-        self.assertIn("<title>Ghost Dubs - Damaged</title>", rss)
+        self.assertEqual(fetched_urls, ["https://fixture-artist.bandcamp.com/music"])
+        self.assertIn("<title>Bandcamp: Fixture Artist</title>", rss)
+        self.assertIn("<title>Fixture Artist - Fixture Record</title>", rss)
 
 
 if __name__ == "__main__":

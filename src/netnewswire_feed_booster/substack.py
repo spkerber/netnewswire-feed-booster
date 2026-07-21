@@ -5,7 +5,7 @@ import re
 from html import unescape
 from typing import Any
 
-from .feed_store import Source, slugify
+from .feed_store import Source, source_id_from_title
 
 
 def parse_substack_profile_html(html: str, profile: str, group: str) -> list[Source]:
@@ -19,7 +19,7 @@ def parse_substack_profile_html(html: str, profile: str, group: str) -> list[Sou
         site_url = substack_publication_url(publication)
         sources.append(
             Source(
-                id=slugify(title),
+                id=source_id_from_title(title, site_url),
                 title=title,
                 feed_url=f"{site_url}/feed",
                 site_url=site_url,
@@ -69,7 +69,7 @@ def parse_substack_library_html(html: str, profile: str, group: str) -> list[Sou
         seen_feed_urls.add(feed_url)
         sources.append(
             Source(
-                id=slugify(title),
+                id=source_id_from_title(title, feed_url),
                 title=title,
                 feed_url=feed_url,
                 site_url=site_url,

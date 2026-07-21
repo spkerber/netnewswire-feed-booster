@@ -9,10 +9,10 @@ from netnewswire_feed_booster.feed_store import FeedStore, Source
 class SubscriptionHistoryTests(unittest.TestCase):
     def test_records_rss_unsubscribe_once_per_source_and_profile(self) -> None:
         source = Source(
-            id="one-useful-thing",
-            title="One Useful Thing",
-            feed_url="https://oneusefulthing.substack.com/feed",
-            site_url="https://oneusefulthing.substack.com",
+            id="fixture-letter",
+            title="Fixture Letter",
+            feed_url="https://fixture-letter.example/feed",
+            site_url="https://fixture-letter.example",
             kind="substack",
         )
 
