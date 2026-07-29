@@ -77,7 +77,7 @@ deploy_modal() {
     echo "Missing ${MODAL_BIN}. Create .venv-modal and install .[modal] before deploying." >&2
     exit 1
   fi
-  export RSS_PROFILE RSS_SOURCES_FILE RSS_FEED_TOKEN MODAL_APP_NAME MODAL_SECRET_NAME MODAL_VOLUME_NAME FULL_FAN_SOURCE_IDS
+  export RSS_PROFILE RSS_SOURCES_FILE RSS_FEED_TOKEN MODAL_APP_NAME MODAL_SECRET_NAME MODAL_VOLUME_NAME FULL_FAN_SOURCE_IDS BANDCAMP_CUSTOM_DOMAINS
   "${MODAL_BIN}" secret create "${MODAL_SECRET_NAME}" --from-dotenv "${PRIVATE_ENV_FILE}" --force
   "${MODAL_BIN}" deploy modal_bandcamp_app.py
 }

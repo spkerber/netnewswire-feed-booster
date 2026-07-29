@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import ipaddress
+import os
+import re
 from typing import Callable, Optional
 from urllib.parse import urlparse
 
@@ -8,6 +11,27 @@ from .feed_store import Source
 
 
 FetchText = Callable[[str], str]
+
+
+def configured_bandcamp_redirect_hosts(value: Optional[str] = None) -> frozenset[str]:
+    """Return exact, privately configured custom-domain redirect hosts."""
+
+    raw = os.environ.get("BANDCAMP_CUSTOM_DOMAINS", "") if value is None else value
+    hosts: set[str] = set()
+    for candidate in raw.split(","):
+        host = candidate.strip().lower().rstrip(".")
+        if not host:
+            continue
+        if not re.fullmatch(r"[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?", host) or "." not in host:
+            raise ValueError(f"Invalid BANDCAMP_CUSTOM_DOMAINS hostname: {candidate}")
+        try:
+            ipaddress.ip_address(host)
+        except ValueError:
+            pass
+        else:
+            raise ValueError(f"BANDCAMP_CUSTOM_DOMAINS must contain hostnames, not IP addresses: {candidate}")
+        hosts.add(host)
+    return frozenset(hosts)
 
 
 @dataclass(frozen=True)
@@ -152,7 +176,9 @@ BANDCAMP_ADAPTER = GeneratedAdapter(
     name="Bandcamp",
     source_label="bandcamp-local-generated",
     hosted_route="bandcamp",
-    allowed_hosts=frozenset({"bandcamp.com"}),
+    # Some Bandcamp storefronts redirect to privately configured custom
+    # domains. Keep those exceptions exact and outside tracked source code.
+    allowed_hosts=frozenset({"bandcamp.com"}) | configured_bandcamp_redirect_hosts(),
     allowed_suffixes=frozenset({"bandcamp.com"}),
     matches=_bandcamp_matches,
     upstream_url=_bandcamp_upstream_url,

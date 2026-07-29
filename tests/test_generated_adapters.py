@@ -7,6 +7,7 @@ from netnewswire_feed_booster.generated_adapters import (
     MIXCLOUD_ADAPTER,
     NTS_ADAPTER,
     adapter_for_source,
+    configured_bandcamp_redirect_hosts,
 )
 from netnewswire_feed_booster.http_client import _RestrictedRedirectHandler, fetch_text
 from netnewswire_feed_booster.hosted_bandcamp import sources_with_hosted_bandcamp_feeds
@@ -74,6 +75,16 @@ class GeneratedAdapterTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "Unsafe fetch URL"):
             handler.redirect_request(None, None, 302, "Found", None, "https://metadata.example/feed")
+
+    def test_bandcamp_custom_domain_redirect_allowlist_is_exact(self) -> None:
+        self.assertEqual(
+            configured_bandcamp_redirect_hosts("Label.Example, shop.label.example."),
+            frozenset({"label.example", "shop.label.example"}),
+        )
+        with self.assertRaisesRegex(ValueError, "hostnames, not IP addresses"):
+            configured_bandcamp_redirect_hosts("127.0.0.1")
+        with self.assertRaisesRegex(ValueError, "Invalid"):
+            configured_bandcamp_redirect_hosts("*.example.com")
 
 
 if __name__ == "__main__":
