@@ -12,4 +12,4 @@ if [[ ! "${profile}" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$ ]]; then
 fi
 
 cd "${repo_root}"
-PYTHONPATH=src python3 scripts/create_example_feed.py --profile "${profile}" "$@"
+PYTHONPATH=src python3 scripts/build_starter_import.py --profile "${profile}" "$@"

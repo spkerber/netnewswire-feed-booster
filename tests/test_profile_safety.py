@@ -4,7 +4,7 @@ import io
 import os
 import subprocess
 import unittest
-from contextlib import redirect_stderr
+from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import patch
 
 from netnewswire_feed_booster.cli import main
@@ -19,6 +19,80 @@ class ProfileSafetyTests(unittest.TestCase):
 
         self.assertEqual(sources.name, "sources.fresh-profile.json")
         self.assertEqual(history.name, "subscription-history.fresh-profile.json")
+
+    def test_configured_paths_can_override_a_parser_default(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            configured_sources = root / "custom-sources.json"
+            configured_history = root / "custom-history.json"
+            with patch.dict(
+                os.environ,
+                {
+                    "RSS_SOURCES_FILE": str(configured_sources),
+                    "RSS_HISTORY_FILE": str(configured_history),
+                },
+            ):
+                self.assertEqual(
+                    default_sources_path("me", prefer_configured=True),
+                    configured_sources,
+                )
+                self.assertEqual(
+                    default_subscription_history_path(
+                        "me",
+                        prefer_configured=True,
+                    ),
+                    configured_history,
+                )
+                self.assertEqual(
+                    default_sources_path("explicit-profile").name,
+                    "sources.explicit-profile.json",
+                )
+
+    def test_cli_distinguishes_default_and_explicit_profiles_for_path_precedence(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            data_path = root / "sources.json"
+            history_path = root / "history.json"
+            private_path = root / "private.json"
+            data_path.write_text('{"schema_version": 1, "sources": []}\n', encoding="utf-8")
+            history_path.write_text('{"schema_version": 1, "entries": []}\n', encoding="utf-8")
+            private_path.write_text('{"schema_version": 1, "sources": []}\n', encoding="utf-8")
+
+            cases = (
+                (["list"], "me", True),
+                (["list", "--profile=explicit"], "explicit", False),
+            )
+            for command, expected_profile, prefer_configured in cases:
+                with self.subTest(command=command):
+                    with (
+                        patch.dict(os.environ, {"RSS_PROFILE": "me"}),
+                        patch(
+                            "netnewswire_feed_booster.cli.default_sources_path",
+                            return_value=data_path,
+                        ) as sources_path,
+                        patch(
+                            "netnewswire_feed_booster.cli.default_subscription_history_path",
+                            return_value=history_path,
+                        ) as history_path_resolver,
+                        redirect_stdout(io.StringIO()),
+                    ):
+                        result = main(
+                            [
+                                "--private-data",
+                                str(private_path),
+                                *command,
+                            ]
+                        )
+
+                    self.assertEqual(result, 0)
+                    sources_path.assert_called_once_with(
+                        expected_profile,
+                        prefer_configured=prefer_configured,
+                    )
+                    history_path_resolver.assert_called_once_with(
+                        expected_profile,
+                        prefer_configured=prefer_configured,
+                    )
 
     def test_invalid_profile_id_is_rejected(self) -> None:
         with self.assertRaises(ValueError):

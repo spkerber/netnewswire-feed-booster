@@ -5,7 +5,7 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import patch
 
-from netnewswire_feed_booster.cli import main
+from netnewswire_feed_booster.cli import build_parser, main, normalize_legacy_webpage_command
 from netnewswire_feed_booster.subscription_history import SubscriptionHistoryStore
 from netnewswire_feed_booster.feed_validation import FeedValidationResult
 from netnewswire_feed_booster.feed_store import FeedStore, Source
@@ -17,6 +17,12 @@ EMPTY_NETNEWSWIRE_OPML = """<?xml version="1.0" encoding="UTF-8"?>
   <head><title>NetNewsWire Export</title></head>
   <body></body>
 </opml>
+"""
+WEBPAGE_RECIPE_HTML = """
+<div data-elementor-type="loop-item">
+  <h2>July 2, 2026</h2>
+  <h2><a href="https://hydefm.com/archive/fixture-show/">Fixture show</a></h2>
+</div>
 """
 
 
@@ -217,8 +223,8 @@ class CliTests(unittest.TestCase):
                     ]
                 )
 
-            default_data.assert_called_once_with("fresh")
-            default_history.assert_called_once_with("fresh")
+            default_data.assert_called_once_with("fresh", prefer_configured=False)
+            default_history.assert_called_once_with("fresh", prefer_configured=False)
             self.assertIsNotNone(FeedStore(data_path).source_by_id("fixture-letter"))
 
     def test_list_redacts_feed_urls_unless_explicitly_requested(self) -> None:
@@ -758,7 +764,87 @@ class CliTests(unittest.TestCase):
         self.assertIn("error\thtml\tbroken-feed", rendered)
         self.assertIn("Audited 2 sources; failures: 1", rendered)
 
-    def test_refresh_generated_local_feeds_regenerates_nts_and_hydefm(self) -> None:
+    def test_subscribe_webpage_feed_uses_a_registered_recipe(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            data_path = root / "sources.json"
+            out_dir = root / "generated"
+
+            with patch(
+                "netnewswire_feed_booster.cli.fetch_text",
+                return_value=WEBPAGE_RECIPE_HTML,
+            ):
+                with redirect_stdout(io.StringIO()) as output:
+                    result = main(
+                        [
+                            "--data",
+                            str(data_path),
+                            "subscribe-webpage-feed",
+                            "https://hydefm.com/archives/",
+                            "--profile",
+                            "trial",
+                            "--group",
+                            "Radio archives",
+                            "--out-dir",
+                            str(out_dir),
+                        ]
+                    )
+
+            source = FeedStore(data_path).source_by_id("radio-hydefm-archives")
+            rss = (out_dir / "radio-hydefm-archives.rss").read_text(encoding="utf-8")
+
+        self.assertEqual(result, 0)
+        self.assertIsNotNone(source)
+        self.assertEqual(source.source, "webpage-local-generated")
+        self.assertEqual(source.groups, ["Radio archives"])
+        self.assertIn("<title>Fixture show</title>", rss)
+        self.assertIn("recipe hydefm-archives", output.getvalue())
+
+    def test_legacy_hydefm_shortcut_routes_through_the_webpage_recipe(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            data_path = root / "sources.json"
+            out_dir = root / "generated"
+
+            with patch(
+                "netnewswire_feed_booster.cli.fetch_text",
+                return_value=WEBPAGE_RECIPE_HTML,
+            ):
+                with redirect_stdout(io.StringIO()):
+                    result = main(
+                        [
+                            "--data",
+                            str(data_path),
+                            "subscribe-hydefm-archive",
+                            "--profile",
+                            "trial",
+                            "--out-dir",
+                            str(out_dir),
+                        ]
+                    )
+
+            source = FeedStore(data_path).source_by_id("radio-hydefm-archives")
+
+        self.assertEqual(result, 0)
+        self.assertIsNotNone(source)
+        self.assertEqual(source.source, "webpage-local-generated")
+
+    def test_legacy_hydefm_shortcut_accepts_argparse_url_forms(self) -> None:
+        expected_url = "https://www.hydefm.com/archives/"
+        for url_arguments in (
+            ["--url", expected_url],
+            [f"--url={expected_url}"],
+        ):
+            with self.subTest(url_arguments=url_arguments):
+                normalized = normalize_legacy_webpage_command(
+                    ["subscribe-hydefm-archive", *url_arguments]
+                )
+                args = build_parser().parse_args(normalized)
+
+                self.assertEqual(args.command, "subscribe-webpage-feed")
+                self.assertEqual(args.url, expected_url)
+
+    def test_refresh_generated_local_feeds_regenerates_nts_and_webpage_recipes(self) -> None:
         with TemporaryDirectory() as tmp_dir:
             data_path = Path(tmp_dir) / "sources.json"
             out_dir = Path(tmp_dir) / "generated"
@@ -783,8 +869,8 @@ class CliTests(unittest.TestCase):
                     site_url="https://radio.example/archives/",
                     kind="other",
                     profiles=["trial"],
-                    groups=["HydeFM"],
-                    source="radio-local-generated",
+                    groups=["Webpage feeds"],
+                    source="webpage-local-generated",
                 )
             )
             store.save()
@@ -801,7 +887,13 @@ class CliTests(unittest.TestCase):
                     return source.site_url
 
                 def render(self, source, _content):
-                    return "<rss>nts</rss>" if source.source == "nts-local-generated" else "<rss>hydefm</rss>"
+                    return "<rss>nts</rss>" if source.source == "nts-local-generated" else "<rss>webpage</rss>"
+
+                def allowed_hosts_for(self, _source):
+                    return self.allowed_hosts
+
+                def allowed_suffixes_for(self, _source):
+                    return self.allowed_suffixes
 
             with patch("netnewswire_feed_booster.cli.adapter_for_source", return_value=FakeAdapter()):
                 with patch("netnewswire_feed_booster.cli.fetch_text", return_value="source content"):
@@ -820,11 +912,11 @@ class CliTests(unittest.TestCase):
 
             refreshed = FeedStore(data_path)
             nts_rss = (out_dir / "nts-example.rss").read_text(encoding="utf-8")
-            hydefm_rss = (out_dir / "radio-fixture-archives.rss").read_text(encoding="utf-8")
+            webpage_rss = (out_dir / "radio-fixture-archives.rss").read_text(encoding="utf-8")
 
         self.assertEqual(result, 0)
         self.assertEqual(nts_rss, "<rss>nts</rss>")
-        self.assertEqual(hydefm_rss, "<rss>hydefm</rss>")
+        self.assertEqual(webpage_rss, "<rss>webpage</rss>")
         self.assertTrue(refreshed.source_by_id("nts-example").feed_url.endswith("/generated/nts-example.rss"))
 
 

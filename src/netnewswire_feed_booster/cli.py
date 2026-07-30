@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 from collections import Counter
 from pathlib import Path
 from typing import Optional
@@ -13,7 +14,7 @@ from .subscription_history import SubscriptionHistoryStore, default_subscription
 from .feed_store import FeedStore, Source, default_private_sources_path, default_sources_path, normalize_url, slugify, source_id_from_title
 from .feed_validation import audit_sources, discover_feed_url
 from .generated_migration import apply_generated_source_migration, plan_generated_source_migration
-from .generated_adapters import BANDCAMP_ADAPTER, HYDEFM_ADAPTER, NTS_ADAPTER, adapter_for_source
+from .generated_adapters import BANDCAMP_ADAPTER, NTS_ADAPTER, WEBPAGE_ADAPTER, adapter_for_source
 from .bridge_policy import (
     DEFAULT_MAX_REFRESH_SOURCES_PER_RUN,
     DEFAULT_REFRESH_INTERVAL_SECONDS,
@@ -22,8 +23,6 @@ from .bridge_policy import (
 )
 from .hosted_bandcamp import bandcamp_fetch_url, bandcamp_items_for_source, sources_with_hosted_bandcamp_feeds
 from .hosted_bandcamp import render_bandcamp_source_rss
-from .hydefm import DEFAULT_ARCHIVE_URL as HYDEFM_ARCHIVE_URL
-from .hydefm import parse_hydefm_archive_markdown
 from .nts import parse_nts_show_html
 from .mixcloud import mixcloud_source
 from .opml import parse_opml, write_opml
@@ -40,6 +39,8 @@ from .source_collections import (
     display_feed_url,
 )
 from .substack import parse_substack_library_html, parse_substack_profile_html
+from .webpage_feeds import parse_webpage_feed
+from .webpage_recipes import HYDEFM_ARCHIVE_RECIPE, require_webpage_recipe
 from .youtube import parse_youtube_channel_html, parse_youtube_subscriptions_file
 
 
@@ -144,11 +145,14 @@ def build_parser() -> argparse.ArgumentParser:
     nts_show_parser.add_argument("--group", default="")
     nts_show_parser.add_argument("--out-dir", type=Path, default=Path("exports/generated"))
 
-    hydefm_parser = subparsers.add_parser("subscribe-hydefm-archive", help="Generate and subscribe to a local RSS feed for HydeFM archives")
-    hydefm_parser.add_argument("--url", default=HYDEFM_ARCHIVE_URL)
-    hydefm_parser.add_argument("--profile", default=DEFAULT_PROFILE)
-    hydefm_parser.add_argument("--group", default="")
-    hydefm_parser.add_argument("--out-dir", type=Path, default=Path("exports/generated"))
+    webpage_parser = subparsers.add_parser(
+        "subscribe-webpage-feed",
+        help="Generate RSS from a public page covered by a registered webpage recipe",
+    )
+    webpage_parser.add_argument("url")
+    webpage_parser.add_argument("--profile", default=DEFAULT_PROFILE)
+    webpage_parser.add_argument("--group", default="")
+    webpage_parser.add_argument("--out-dir", type=Path, default=Path("exports/generated"))
 
     mixcloud_parser = subparsers.add_parser("subscribe-mixcloud-profile", help="Generate and subscribe to RSS from a public Mixcloud profile")
     mixcloud_parser.add_argument("url")
@@ -171,7 +175,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     generated_local_parser = subparsers.add_parser(
         "refresh-generated-local-feeds",
-        help="Regenerate saved NTS and HydeFM local RSS files",
+        help="Regenerate saved NTS, Mixcloud, and registered webpage-recipe RSS files",
     )
     generated_local_parser.add_argument("--profile", default=DEFAULT_PROFILE)
     generated_local_parser.add_argument("--out-dir", type=Path, default=Path("exports/generated"))
@@ -290,19 +294,64 @@ def add_source_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--notes", default="")
 
 
+def normalize_legacy_webpage_command(argv: Optional[list[str]]) -> list[str]:
+    """Keep the v0.1 HydeFM shortcut working without presenting it as a feature."""
+
+    normalized = list(sys.argv[1:] if argv is None else argv)
+    try:
+        command_index = normalized.index("subscribe-hydefm-archive")
+    except ValueError:
+        return normalized
+
+    normalized[command_index] = "subscribe-webpage-feed"
+    site_url = HYDEFM_ARCHIVE_RECIPE.default_url
+    url_flag_index = next(
+        (
+            index
+            for index in range(command_index + 1, len(normalized))
+            if normalized[index] == "--url" or normalized[index].startswith("--url=")
+        ),
+        None,
+    )
+    if url_flag_index is not None:
+        url_argument = normalized[url_flag_index]
+        if url_argument.startswith("--url="):
+            site_url = url_argument.split("=", 1)[1]
+            del normalized[url_flag_index]
+        else:
+            if url_flag_index + 1 >= len(normalized):
+                return normalized
+            site_url = normalized[url_flag_index + 1]
+            del normalized[url_flag_index : url_flag_index + 2]
+    normalized.insert(command_index + 1, site_url)
+    return normalized
+
+
+def _option_was_supplied(argv: list[str], option: str) -> bool:
+    return any(argument == option or argument.startswith(f"{option}=") for argument in argv)
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     parser = build_parser()
-    args = parser.parse_args(argv)
+    normalized_argv = normalize_legacy_webpage_command(argv)
+    profile_was_explicit = _option_was_supplied(normalized_argv, "--profile")
+    args = parser.parse_args(normalized_argv)
     profile = getattr(args, "profile", None) or os.environ.get("RSS_PROFILE", "")
     data_was_explicit = args.data is not None
     if args.data is None:
         try:
-            args.data = default_sources_path(profile)
+            args.data = default_sources_path(
+                profile,
+                prefer_configured=not profile_was_explicit,
+            )
         except ValueError as error:
             parser.error(str(error))
     if args.history is None:
         try:
-            args.history = default_subscription_history_path(profile)
+            args.history = default_subscription_history_path(
+                profile,
+                prefer_configured=not profile_was_explicit,
+            )
         except ValueError as error:
             parser.error(str(error))
     if (
@@ -514,41 +563,46 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"Subscribed NTS show {changed_id}.")
         return 0
 
-    if args.command == "subscribe-hydefm-archive":
+    if args.command == "subscribe-webpage-feed":
+        site_url = args.url.strip()
+        recipe = require_webpage_recipe(site_url)
         candidate = Source(
-            id="radio-hydefm-archives",
-            title="HydeFM Archives",
+            id=slugify(f"{recipe.source_id_prefix} {recipe.name}"),
+            title=recipe.name,
             feed_url="generated",
-            site_url=args.url.rstrip("/") + "/",
+            site_url=site_url,
             kind="other",
-            source="radio-local-generated",
+            source=WEBPAGE_ADAPTER.source_label,
         )
-        HYDEFM_ADAPTER.validate(candidate)
-        markdown = fetch_text(
-            HYDEFM_ADAPTER.upstream_url(candidate),
-            allowed_hosts=HYDEFM_ADAPTER.allowed_hosts,
-            allowed_suffixes=HYDEFM_ADAPTER.allowed_suffixes,
+        WEBPAGE_ADAPTER.validate(candidate)
+        content = fetch_text(
+            WEBPAGE_ADAPTER.upstream_url(candidate),
+            allowed_hosts=WEBPAGE_ADAPTER.allowed_hosts_for(candidate),
+            allowed_suffixes=WEBPAGE_ADAPTER.allowed_suffixes_for(candidate),
         )
-        title, _, _ = parse_hydefm_archive_markdown(markdown, candidate.site_url)
-        source_id = slugify(f"Radio {title}")
+        parsed_feed = parse_webpage_feed(recipe, content, candidate.site_url)
+        source_id = slugify(f"{recipe.source_id_prefix} {parsed_feed.title}")
         out_path = args.out_dir / f"{source_id}.rss"
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(HYDEFM_ADAPTER.render(candidate, markdown), encoding="utf-8")
+        out_path.write_text(WEBPAGE_ADAPTER.render(candidate, content), encoding="utf-8")
         source = Source(
             id=source_id,
-            title=title,
+            title=parsed_feed.title,
             feed_url=out_path.resolve().as_uri(),
-            site_url=args.url.rstrip("/") + "/",
+            site_url=site_url,
             kind="other",
             profiles=[args.profile],
             groups=[args.group],
-            source="radio-local-generated",
-            notes="Generated local RSS feed from the HydeFM archive page via a text mirror because HydeFM blocks direct scripted RSS/archive fetches with Cloudflare.",
+            source=WEBPAGE_ADAPTER.source_label,
+            notes=(
+                f"Generated local RSS from the public {recipe.name} page "
+                "using a reviewed, allowlisted webpage recipe."
+            ),
         )
         changed_id = store.add_or_update(source)
         store.set_status(changed_id, "active")
         store.save()
-        print(f"Subscribed HydeFM archive {changed_id}.")
+        print(f"Subscribed webpage feed {changed_id} with recipe {recipe.id}.")
         return 0
 
     if args.command == "subscribe-mixcloud-profile":
@@ -559,8 +613,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         adapter.validate(source)
         content = fetch_text(
             adapter.upstream_url(source),
-            allowed_hosts=adapter.allowed_hosts,
-            allowed_suffixes=adapter.allowed_suffixes,
+            allowed_hosts=adapter.allowed_hosts_for(source),
+            allowed_suffixes=adapter.allowed_suffixes_for(source),
         )
         rss = adapter.render(source, content)
         out_path = args.out_dir / f"{source.id}.rss"
@@ -645,8 +699,8 @@ def main(argv: Optional[list[str]] = None) -> int:
                 adapter.validate(source)
                 content = fetch_text(
                     adapter.upstream_url(source),
-                    allowed_hosts=adapter.allowed_hosts,
-                    allowed_suffixes=adapter.allowed_suffixes,
+                    allowed_hosts=adapter.allowed_hosts_for(source),
+                    allowed_suffixes=adapter.allowed_suffixes_for(source),
                 )
                 rss = adapter.render(source, content)
                 out_path = args.out_dir / f"{source.id}.rss"

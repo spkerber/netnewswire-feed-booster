@@ -139,9 +139,9 @@ PYTHONPATH=src python3 -m netnewswire_feed_booster \
   refresh-bandcamp-local-feeds --profile "$RSS_PROFILE"
 ```
 
-Re-add any NTS or HydeFM generated sources with their original public page URLs, then export fresh OPML. Do not copy old `exports/` files or add profile registries to the public repository.
+Re-add any NTS or webpage-recipe sources with their original public page URLs, then export fresh OPML. Do not copy old `exports/` files or add profile registries to the public repository.
 
-For a plain list of extra source URLs, save the list under `imports/` and ask the agent to classify it. Direct HTTPS RSS, Atom, and JSON Feeds should stay direct. Public Bandcamp, NTS, and HydeFM sources may need their source-specific commands. Private or paid feeds belong in ignored `data/private-sources.json`; do not send their URLs to a hosted agent.
+For a plain list of extra source URLs, save the list under `imports/` and ask the agent to classify it. Direct HTTPS RSS, Atom, and JSON Feeds should stay direct. Public Bandcamp and NTS sources may need their source-specific commands; difficult public archive pages may use a registered webpage recipe. Private or paid feeds belong in ignored `data/private-sources.json`; do not send their URLs to a hosted agent.
 
 ## Review Before Importing Back
 

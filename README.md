@@ -8,7 +8,7 @@
 
 NetNewsWire Feed Booster helps you collect, organize, and move RSS subscriptions without making a social platform your reading environment. It keeps a private, portable registry of feed metadata, exports clean OPML, and generates RSS only when a public source does not offer a useful native feed.
 
-NetNewsWire remains the reader. This project does not store articles, scrape private accounts, change upstream subscriptions, or track what you read.
+Read and manage subscriptions in NetNewsWire. This project does not store articles, scrape private accounts, change upstream subscriptions, or track what you read.
 
 ```mermaid
 flowchart LR
@@ -24,22 +24,24 @@ flowchart LR
 
 It is designed for slow, intentional catch-up rather than minute-by-minute monitoring. See [Slow Reading And Refresh Policy](docs/reading-practice.md) for the default cadence, capacity, storage model, and tuning tradeoffs.
 
-## Try The Complete Workflow
+## Build A Starter Import
 
-The public starter bundle runs the actual registry, validation, generated-feed, and OPML code against eight public sources. It includes Pitchfork album reviews, No Bells, HasanAbi, Breaking Points, Drop Site News, and the Dark Entries Records, Cone Shape Top Imprint, and NO BIAS Bandcamp pages.
+The starter import runs the registry, validation, generated-feed, and OPML code against eight public sources. It includes Pitchfork album reviews, No Bells, HasanAbi, Breaking Points, Drop Site News, and the Dark Entries Records, Cone Shape Top Imprint, and NO BIAS Bandcamp pages.
 
-![Starter bundle preview showing eight feeds in three NetNewsWire folders](docs/images/starter-bundle-preview.png)
+![Starter import report showing eight feeds in three proposed NetNewsWire folders](docs/images/starter-import-report.png)
+
+The browser page is an import report. It shows what the command built before you decide whether to import the OPML. It is not a feed reader or a second subscription-management interface.
 
 On a Mac with Python 3 installed:
 
 1. Download and unzip this repository.
-2. Double-click **Start Example Feed.command**.
-3. Review the page that opens, then import `starter-netnewswire.opml` from `exports/` only if you want those feeds in NetNewsWire.
+2. Double-click **Build Starter Import.command**.
+3. Review the report, then import `starter-netnewswire.opml` from `exports/` only if you want those feeds in NetNewsWire.
 
 From a terminal, the same workflow is:
 
 ```bash
-./scripts/create_example_feed.sh starter --open
+./scripts/build_starter_import.sh starter --open
 ```
 
 It makes public network requests to validate the five direct feeds and generate three local Bandcamp feeds. It does not open, edit, or import anything into NetNewsWire. Existing starter files are never overwritten unless you deliberately add `--force`.
@@ -48,12 +50,12 @@ It makes public network requests to validate the five direct feeds and generate 
 
 | You want to... | Start here | What you need |
 | --- | --- | --- |
-| See the whole product with public examples | Double-click `Start Example Feed.command` | Mac, Finder, and Python 3.9+ |
+| Build and review a starter OPML import | Double-click `Build Starter Import.command` | Mac, Finder, and Python 3.9+ |
 | Add one native feed without this tool | [GUI workflow](docs/setup.md#gui-first-workflow-no-terminal) | NetNewsWire |
 | Keep a portable source registry yourself | [Terminal workflow](docs/setup.md#terminal-workflow) | Git and Python 3.9+ |
 | Set up or migrate with a local coding agent | [Agent-assisted workflow](docs/agent-assisted-setup.md) | A local clone and a coding harness |
 | Import subscriptions from platforms | [Collect sources](docs/source-collection.md) | An OPML file, a supported export, or public URLs |
-| Add Bandcamp, NTS, HydeFM, or Mixcloud | [Generated feeds](docs/source-types.md#generated-rss) | Terminal or local coding agent; optional HTTPS host |
+| Add Bandcamp, NTS, Mixcloud, or a supported webpage recipe | [Generated feeds](docs/source-types.md#generated-rss) | Terminal or local coding agent; optional HTTPS host |
 
 Start with NetNewsWire's [download page](https://netnewswire.com/). Choose `On My Mac` for a single-Mac trial or an isolated migration. Choose `iCloud` only when you are ready to sync subscriptions and reading state between Apple devices. NetNewsWire’s [getting-started guide](https://netnewswire.com/help/mac/6.1/en/getting-started.html) explains both account choices.
 
@@ -86,7 +88,7 @@ Review the candidate before importing it back into NetNewsWire. The full, visual
 
 Keep native HTTPS RSS, Atom, and JSON feeds direct. They are more reliable, respect the publisher’s intended delivery, and use no bridge resources. This includes publisher feeds, podcasts, Substack publications, and official YouTube channel feeds.
 
-Use a generated feed only for a public source without a useful native feed, such as a Bandcamp page, NTS show, HydeFM archive, or public Mixcloud profile. Generated sources are optional; they need a local command or coding agent, and NetNewsWire may need an HTTPS bridge rather than a `file://` URL. See [Source Types](docs/source-types.md) and [Hosted Bridge](docs/hosting.md).
+Use a generated feed only for a public source without a useful native feed, such as a Bandcamp page, NTS show, public Mixcloud profile, or a page covered by a reviewed webpage recipe. Generated sources are optional; they need a local command or coding agent, and NetNewsWire may need an HTTPS bridge rather than a `file://` URL. See [Source Types](docs/source-types.md) and [Hosted Bridge](docs/hosting.md).
 
 ## Privacy Boundary
 
@@ -117,7 +119,7 @@ See [Public Release](docs/public-release.md) for the full release checklist.
 ## Documentation
 
 - [Setup](docs/setup.md): visual first-run guide for GUI, terminal, and iCloud/On My Mac choices.
-- [First Feed](docs/first-feed.md): public starter bundle, one-feed fallback, import success check, troubleshooting, and FAQ.
+- [First Import](docs/first-feed.md): public starter report, one-feed fallback, import success check, troubleshooting, and FAQ.
 - [Collect Sources](docs/source-collection.md): existing OPML, YouTube exports and URLs, Bandcamp, podcasts, Substack, and supported input formats.
 - [Agent-Assisted Setup](docs/agent-assisted-setup.md): a safe handoff prompt and approval boundaries for local coding harnesses.
 - [Operations](docs/operations.md): daily, weekly, and occasional maintenance routines.
@@ -129,4 +131,4 @@ See [Public Release](docs/public-release.md) for the full release checklist.
 
 ## License And Community
 
-This project is [MIT licensed](LICENSE). NetNewsWire is a separate project and remains the reading UI. See [docs/netnewswire-community-note.md](docs/netnewswire-community-note.md) for an accurate community post.
+This project is [MIT licensed](LICENSE). NetNewsWire is a separate project; use its interface to read and manage subscriptions. See [docs/netnewswire-community-note.md](docs/netnewswire-community-note.md) for an accurate community post.

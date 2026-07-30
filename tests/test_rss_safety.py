@@ -25,7 +25,7 @@ class RssSafetyTests(unittest.TestCase):
 
     def test_validate_source_id_allows_slug_ids_only(self) -> None:
         self.assertTrue(is_safe_source_id("nts-dark-entries-w-josh-cheon"))
-        self.assertEqual(validate_source_id("radio-hydefm-archives"), "radio-hydefm-archives")
+        self.assertEqual(validate_source_id("webpage-public-archive"), "webpage-public-archive")
 
         for value in ["../secret", "bad/id", "Bad-ID", "-bad", "bad_", "a" * 129]:
             self.assertFalse(is_safe_source_id(value))

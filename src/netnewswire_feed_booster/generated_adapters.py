@@ -11,6 +11,7 @@ from .feed_store import Source
 
 
 FetchText = Callable[[str], str]
+SourceHostPolicy = Callable[[Source], frozenset[str]]
 
 
 def configured_bandcamp_redirect_hosts(value: Optional[str] = None) -> frozenset[str]:
@@ -46,12 +47,29 @@ class GeneratedAdapter:
     matches: Callable[[Source], bool]
     upstream_url: Callable[[Source], str]
     render: Callable[[Source, str], str]
+    legacy_source_labels: frozenset[str] = frozenset()
+    source_allowed_hosts: Optional[SourceHostPolicy] = None
+    source_allowed_suffixes: Optional[SourceHostPolicy] = None
 
     def validate(self, source: Source) -> None:
         if not self.matches(source):
             raise ValueError(f"{source.id} is not a valid {self.name} source")
         # Calling upstream_url performs adapter-specific URL-shape validation.
         self.upstream_url(source)
+
+    @property
+    def source_labels(self) -> frozenset[str]:
+        return frozenset({self.source_label}) | self.legacy_source_labels
+
+    def allowed_hosts_for(self, source: Source) -> frozenset[str]:
+        if self.source_allowed_hosts:
+            return self.source_allowed_hosts(source)
+        return self.allowed_hosts
+
+    def allowed_suffixes_for(self, source: Source) -> frozenset[str]:
+        if self.source_allowed_suffixes:
+            return self.source_allowed_suffixes(source)
+        return self.allowed_suffixes
 
 
 def _require_https_path(source: Source, hosts: set[str], path_prefix: str) -> None:
@@ -115,28 +133,47 @@ def _render_nts(source: Source, content: str) -> str:
     return render_nts_show_rss(source.site_url, fetcher=lambda _: content)
 
 
-def _hydefm_matches(source: Source) -> bool:
-    if source.source != "radio-local-generated":
+def _webpage_matches(source: Source) -> bool:
+    if source.source not in {"webpage-local-generated", "radio-local-generated"}:
         return False
-    try:
-        _require_https_path(source, {"hydefm.com", "www.hydefm.com"}, "/archives")
-    except ValueError:
-        return False
-    return True
+    from .webpage_recipes import webpage_recipe_for_url
+
+    return webpage_recipe_for_url(source.site_url) is not None
 
 
-def _hydefm_upstream_url(source: Source) -> str:
-    from .hydefm import hydefm_text_mirror_url
+def _webpage_upstream_url(source: Source) -> str:
+    from .webpage_feeds import recipe_fetch_url
+    from .webpage_recipes import require_webpage_recipe
 
-    if not _hydefm_matches(source):
-        raise ValueError(f"Unsupported HydeFM archive URL: {source.site_url}")
-    return hydefm_text_mirror_url(source.site_url)
+    if not _webpage_matches(source):
+        raise ValueError(f"Unsupported webpage recipe URL: {source.site_url}")
+    recipe = require_webpage_recipe(source.site_url)
+    return recipe_fetch_url(recipe, source.site_url)
 
 
-def _render_hydefm(source: Source, content: str) -> str:
-    from .hydefm import render_hydefm_archive_rss
+def _render_webpage(source: Source, content: str) -> str:
+    from .webpage_feeds import render_webpage_feed_rss
+    from .webpage_recipes import require_webpage_recipe
 
-    return render_hydefm_archive_rss(source.site_url, fetcher=lambda _: content)
+    recipe = require_webpage_recipe(source.site_url)
+    return render_webpage_feed_rss(recipe, source.site_url, content)
+
+
+def _webpage_allowed_hosts(source: Source) -> frozenset[str]:
+    from .webpage_recipes import require_webpage_recipe
+
+    return require_webpage_recipe(source.site_url).allowed_fetch_hosts
+
+
+def _hydefm_compat_matches(source: Source) -> bool:
+    from .webpage_recipes import HYDEFM_ARCHIVE_RECIPE, webpage_recipe_for_url
+
+    recipe = webpage_recipe_for_url(source.site_url)
+    return (
+        source.source in {"radio-local-generated", "webpage-local-generated"}
+        and recipe is not None
+        and recipe.id == HYDEFM_ARCHIVE_RECIPE.id
+    )
 
 
 def _mixcloud_matches(source: Source) -> bool:
@@ -194,15 +231,31 @@ NTS_ADAPTER = GeneratedAdapter(
     upstream_url=_nts_upstream_url,
     render=_render_nts,
 )
+WEBPAGE_ADAPTER = GeneratedAdapter(
+    name="webpage recipe",
+    source_label="webpage-local-generated",
+    hosted_route="generated",
+    allowed_hosts=frozenset(),
+    allowed_suffixes=frozenset(),
+    matches=_webpage_matches,
+    upstream_url=_webpage_upstream_url,
+    render=_render_webpage,
+    legacy_source_labels=frozenset({"radio-local-generated"}),
+    source_allowed_hosts=_webpage_allowed_hosts,
+)
+# Compatibility for callers written against v0.1.0. Keep the old adapter name
+# and static fetch-policy fields bounded to HydeFM; new code should use
+# WEBPAGE_ADAPTER.allowed_hosts_for(source).
 HYDEFM_ADAPTER = GeneratedAdapter(
     name="HydeFM",
     source_label="radio-local-generated",
     hosted_route="generated",
-    allowed_hosts=frozenset({"r.jina.ai"}),
+    allowed_hosts=frozenset({"hydefm.com", "www.hydefm.com"}),
     allowed_suffixes=frozenset(),
-    matches=_hydefm_matches,
-    upstream_url=_hydefm_upstream_url,
-    render=_render_hydefm,
+    matches=_hydefm_compat_matches,
+    upstream_url=_webpage_upstream_url,
+    render=_render_webpage,
+    legacy_source_labels=frozenset({"webpage-local-generated"}),
 )
 MIXCLOUD_ADAPTER = GeneratedAdapter(
     name="Mixcloud",
@@ -215,8 +268,12 @@ MIXCLOUD_ADAPTER = GeneratedAdapter(
     render=_render_mixcloud,
 )
 
-GENERATED_ADAPTERS = (BANDCAMP_ADAPTER, NTS_ADAPTER, HYDEFM_ADAPTER, MIXCLOUD_ADAPTER)
-GENERATED_SOURCE_LABELS = frozenset(adapter.source_label for adapter in GENERATED_ADAPTERS)
+GENERATED_ADAPTERS = (BANDCAMP_ADAPTER, NTS_ADAPTER, WEBPAGE_ADAPTER, MIXCLOUD_ADAPTER)
+GENERATED_SOURCE_LABELS = frozenset(
+    source_label
+    for adapter in GENERATED_ADAPTERS
+    for source_label in adapter.source_labels
+)
 
 
 def adapter_for_source(source: Source) -> Optional[GeneratedAdapter]:

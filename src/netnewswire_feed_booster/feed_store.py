@@ -29,11 +29,14 @@ def validate_profile_id(profile: str) -> str:
     return profile
 
 
-def default_sources_path(profile: str = "") -> Path:
+def default_sources_path(profile: str = "", *, prefer_configured: bool = False) -> Path:
     configured = os.environ.get("RSS_SOURCES_FILE")
-    if configured:
+    if configured and (prefer_configured or not profile):
         return Path(configured)
-    profile = profile or os.environ.get("RSS_PROFILE", "")
+    if profile:
+        profile = validate_profile_id(profile)
+        return repo_root() / "data" / f"sources.{profile}.json"
+    profile = os.environ.get("RSS_PROFILE", "")
     if profile:
         profile = validate_profile_id(profile)
         return repo_root() / "data" / f"sources.{profile}.json"

@@ -200,8 +200,8 @@ class GeneratedSourceMigrationTests(unittest.TestCase):
                     site_url="https://radio.example/archives/",
                     kind="other",
                     profiles=["old"],
-                    groups=["HydeFM"],
-                    source="radio-local-generated",
+                    groups=["Webpage feeds"],
+                    source="webpage-local-generated",
                 )
             )
             reference.save()
@@ -214,7 +214,7 @@ class GeneratedSourceMigrationTests(unittest.TestCase):
                     feed_url="https://old-host.example/feeds/old-token/generated/fixture-archives.rss",
                     site_url="https://radio.example/archives/",
                     profiles=["trial"],
-                    groups=["HydeFM"],
+                    groups=["Webpage feeds"],
                     source="netnewswire-import",
                 )
             )

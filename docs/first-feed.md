@@ -1,29 +1,29 @@
-# First Feed: From Link To Loaded Item
+# First Import: From Public Sources To NetNewsWire
 
-Start here if you want to see the complete product before importing your own source list, setting up a host, or using iCloud. The starter bundle uses eight public sources and writes only ignored local files. You do not need Modal, a token, or a coding agent.
+Use this once to build a reviewable OPML import before working with your own source list, setting up a host, or using iCloud. The starter import uses eight public sources and writes only ignored local files. You do not need Modal, a token, or a coding agent.
 
 ```mermaid
 flowchart LR
-    A["Create public starter bundle"] --> B["Review generated preview"]
+    A["Build starter import"] --> B["Review import report"]
     B --> C{"Want these examples in NetNewsWire?"}
     C -->|"Yes"| D["Import OPML into On My Mac"]
     C -->|"No"| E["Stop; nothing was imported"]
     D --> F["Confirm folders and items load"]
 ```
 
-## Option A: Double-Click The Product
+## Option A: Build A Starter Import
 
-This route exercises the real source registry, feed validation, generated Bandcamp adapters, and OPML export.
+This route runs the source registry, feed validation, generated Bandcamp adapters, and OPML export.
 
 1. Download the repository ZIP from [GitHub](https://github.com/spkerber/netnewswire-feed-booster), then unzip it.
 2. Confirm `python3 --version` reports Python 3.9 or later. If you are unsure, double-clicking the file below will give you a direct error instead of changing anything.
-3. Double-click **Start Example Feed.command** in the unzipped folder.
+3. Double-click **Build Starter Import.command** in the unzipped folder.
 4. Wait while it validates five direct public feeds and generates RSS for three public Bandcamp label pages.
-5. Review the page that opens.
+5. Review the import report that opens.
 
-![Generated starter bundle preview with direct and locally generated feeds](images/starter-bundle-preview.png)
+![Starter import report with direct and locally generated feeds](images/starter-import-report.png)
 
-The command creates an ignored `starter` profile, an HTML preview, three local RSS files, and `exports/starter-netnewswire.opml`. It does not open or alter NetNewsWire. If the profile already exists, it stops rather than overwriting it.
+The command creates an ignored `starter` profile, an HTML import report, three local RSS files, and `exports/starter-netnewswire.opml`. The report is a build receipt, not a reader. The command does not open or alter NetNewsWire. If the profile already exists, it stops rather than overwriting it.
 
 To try the import:
 
@@ -57,7 +57,7 @@ Run the same eight-source starter workflow from a shell:
 ```bash
 git clone https://github.com/spkerber/netnewswire-feed-booster.git
 cd netnewswire-feed-booster
-./scripts/create_example_feed.sh starter --open
+./scripts/build_starter_import.sh starter --open
 ```
 
 For your own private source list, continue with the [Terminal Workflow](setup.md#terminal-workflow). Create a different profile rather than repurposing the public starter.
@@ -76,7 +76,7 @@ OPML moves subscription lists and folders, not your old local read/unread histor
 
 | What you see | What to do |
 | --- | --- |
-| `Start Example Feed.command` will not open | Control-click it, choose **Open**, and confirm. macOS may ask once because it came from a downloaded ZIP. |
+| `Build Starter Import.command` will not open | Control-click it, choose **Open**, and confirm. macOS may ask once because it came from a downloaded ZIP. |
 | The starter profile already exists | Stop and review it. Use a different profile name from Terminal; use `--force` only when intentionally replacing the public example files. |
 | A public validation request fails | The script leaves the existing profile untouched. Check your connection, then retry; upstream sites can be temporarily unavailable. |
 | The feed title does not appear | Confirm you selected **On My Mac**, then try adding the direct URL again. Do not set up Modal. |

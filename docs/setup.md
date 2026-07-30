@@ -4,7 +4,7 @@ This guide has three paths. Start with the one that matches how you want to work
 
 | Path | Best for | Requires |
 | --- | --- | --- |
-| Starter bundle | Running the real product with eight public examples | Finder and Python 3.9+ |
+| Starter import | Building and reviewing OPML from eight public examples | Finder and Python 3.9+ |
 | GUI-first | Reading and adding one native feed without this product | NetNewsWire |
 | Terminal | Keeping a versioned, local registry yourself | Git and Python 3.9+ |
 | Agent-assisted | A semi-technical setup with reviewable automation | A local clone and a coding harness |
@@ -30,9 +30,9 @@ flowchart TD
 
 ## GUI-First Workflow (No Terminal)
 
-Use this path when you only need native feeds and want NetNewsWire to be the entire workflow. It is a NetNewsWire workflow, not a trial of Feed Booster. To exercise this product without typing commands, download the repository and double-click `Start Example Feed.command` as described in [First Feed](first-feed.md).
+Use this path when you only need native feeds and want NetNewsWire to handle the whole workflow. To exercise Feed Booster without typing commands, download the repository and double-click `Build Starter Import.command` as described in [First Import](first-feed.md).
 
-For the shortest path from download to a verified working feed, follow [First Feed](first-feed.md) before adding your own sources.
+For the shortest path from download to a verified working feed, follow [First Import](first-feed.md) before adding your own sources.
 
 ### Add a Feed Manually
 

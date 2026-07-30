@@ -18,22 +18,22 @@ from .opml import render_opml
 
 
 @dataclass(frozen=True)
-class ExampleBundleResult:
+class StarterImportResult:
     source_count: int
     direct_count: int
     generated_count: int
     profile: str
     opml_name: str
-    preview_name: str
+    report_name: str
 
 
-def load_example_manifest(path: Path) -> Dict[str, Any]:
+def load_starter_import_manifest(path: Path) -> Dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if payload.get("schema_version") != 1:
-        raise ValueError("Unsupported example bundle schema.")
+        raise ValueError("Unsupported starter import manifest schema.")
     sources = payload.get("sources")
     if not isinstance(sources, list) or not sources:
-        raise ValueError("Example bundle must contain at least one source.")
+        raise ValueError("Starter import manifest must contain at least one source.")
 
     required = {"id", "title", "delivery", "kind", "site_url", "group"}
     seen_ids: set[str] = set()
@@ -54,30 +54,30 @@ def load_example_manifest(path: Path) -> Dict[str, Any]:
     return payload
 
 
-def build_example_bundle(
+def build_starter_import(
     *,
     repo_root: Path,
     manifest_path: Path,
     profile: str = "starter",
     force: bool = False,
     validate_network: bool = True,
-) -> ExampleBundleResult:
+) -> StarterImportResult:
     profile = validate_profile_id(profile)
-    manifest = load_example_manifest(manifest_path)
+    manifest = load_starter_import_manifest(manifest_path)
     specs: List[Dict[str, Any]] = manifest["sources"]
 
     data_path = repo_root / "data" / f"sources.{profile}.json"
     history_path = repo_root / "data" / f"subscription-history.{profile}.json"
     profiles_path = repo_root / "data" / f"profiles.{profile}.json"
     opml_path = repo_root / "exports" / f"{profile}-netnewswire.opml"
-    preview_path = repo_root / "exports" / f"{profile}-preview.html"
+    report_path = repo_root / "exports" / f"{profile}-import-report.html"
     bandcamp_dir = repo_root / "exports" / "bandcamp"
     bandcamp_targets = [
         bandcamp_dir / f"{item['id']}.rss"
         for item in specs
         if item["delivery"] == "generated"
     ]
-    targets = [data_path, history_path, profiles_path, opml_path, preview_path, *bandcamp_targets]
+    targets = [data_path, history_path, profiles_path, opml_path, report_path, *bandcamp_targets]
     existing = [path for path in targets if path.exists()]
     if existing and not force:
         names = ", ".join(path.name for path in existing)
@@ -119,14 +119,14 @@ def build_example_bundle(
         "profiles": [
             {
                 "id": profile,
-                "display_name": "Starter bundle",
+                "display_name": "Starter import",
                 "default_reader": "NetNewsWire",
                 "devices": [{"id": "mac", "label": "Mac", "reader": "NetNewsWire"}],
             }
         ],
     }
     opml = render_opml(sources, title=manifest["title"])
-    preview = render_example_preview(manifest, sources)
+    report = render_import_report(manifest, sources)
 
     repo_root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="netnewswire-example-") as temp_dir:
@@ -136,7 +136,7 @@ def build_example_bundle(
         staged_files.append((_stage_json(staging / history_path.name, history_payload), history_path))
         staged_files.append((_stage_json(staging / profiles_path.name, profiles_payload), profiles_path))
         staged_files.append((_stage_text(staging / opml_path.name, opml), opml_path))
-        staged_files.append((_stage_text(staging / preview_path.name, preview), preview_path))
+        staged_files.append((_stage_text(staging / report_path.name, report), report_path))
         for source_id, rss in generated_rss.items():
             staged_files.append((_stage_text(staging / f"{source_id}.rss", rss), bandcamp_dir / f"{source_id}.rss"))
 
@@ -145,17 +145,17 @@ def build_example_bundle(
             os.replace(staged, target)
             target.chmod(0o600)
 
-    return ExampleBundleResult(
+    return StarterImportResult(
         source_count=len(sources),
         direct_count=sum(source.kind != "bandcamp" for source in sources),
         generated_count=sum(source.kind == "bandcamp" for source in sources),
         profile=profile,
         opml_name=opml_path.name,
-        preview_name=preview_path.name,
+        report_name=report_path.name,
     )
 
 
-def render_example_preview(manifest: Dict[str, Any], sources: Iterable[Source]) -> str:
+def render_import_report(manifest: Dict[str, Any], sources: Iterable[Source]) -> str:
     source_list = list(sources)
     folders: Dict[str, List[Source]] = {}
     for source in source_list:
@@ -257,47 +257,42 @@ def render_example_preview(manifest: Dict[str, Any], sources: Iterable[Source]) 
     .badge.generated {{ color: var(--coral); background: var(--coral-soft); }}
     .next {{
       margin-top: 42px; padding: 24px; border-radius: 18px; background: var(--ink); color: white;
-      display: grid; grid-template-columns: 1fr auto; gap: 22px; align-items: center;
     }}
     .next h2 {{ margin: 0 0 7px; font: 700 25px/1.1 Georgia, serif; }}
     .next p {{ margin: 0; color: #cad2cf; line-height: 1.45; }}
-    .steps {{ display: flex; gap: 7px; }}
-    .steps span {{ width: 34px; height: 34px; border-radius: 50%; background: var(--green); display: grid; place-items: center; font-weight: 750; }}
     footer {{ margin-top: 20px; color: var(--muted); font-size: 12px; }}
     @media (max-width: 720px) {{
       main {{ width: min(100% - 28px, 1120px); padding-top: 30px; }}
       .summary, .source-grid {{ grid-template-columns: 1fr; }}
-      .next {{ grid-template-columns: 1fr; }}
     }}
   </style>
 </head>
 <body>
   <main>
-    <div class="eyebrow">NetNewsWire Feed Booster · starter bundle</div>
-    <h1>Your example feed is ready.</h1>
+    <div class="eyebrow">NetNewsWire Feed Booster · import report</div>
+    <h1>{len(source_list)} feeds are ready to review.</h1>
     <p class="lede">{html.escape(manifest['description'])}</p>
     <div class="summary" aria-label="Bundle summary">
-      <div class="stat"><strong>{len(source_list)}</strong><span>public sources</span></div>
+      <div class="stat"><strong>{len(source_list)}</strong><span>feeds checked</span></div>
       <div class="stat"><strong>{sum(source.kind != 'bandcamp' for source in source_list)}</strong><span>direct feeds</span></div>
       <div class="stat"><strong>{sum(source.kind == 'bandcamp' for source in source_list)}</strong><span>generated Bandcamp feeds</span></div>
     </div>
     {''.join(folder_html)}
     <section class="next">
       <div>
-        <h2>Import the OPML when you are ready.</h2>
-        <p>In NetNewsWire, choose File → Import Subscriptions…, select On My Mac, then choose the generated starter OPML file. Nothing has been imported automatically.</p>
+        <h2>Import with NetNewsWire when you want these feeds.</h2>
+        <p>Choose File → Import Subscriptions…, select On My Mac, then choose the generated starter OPML file. This report did not import or subscribe to anything.</p>
       </div>
-      <div class="steps" aria-label="Three import steps"><span>1</span><span>2</span><span>3</span></div>
     </section>
-    <footer>All examples are public. Generated Bandcamp RSS stays on this Mac unless you deliberately configure optional hosting.</footer>
+    <footer>This is a build report, not a feed reader. Read and manage subscriptions in NetNewsWire. Generated Bandcamp RSS stays on this Mac unless you deliberately configure optional hosting.</footer>
   </main>
 </body>
 </html>
 """
 
 
-def open_example_preview(repo_root: Path, result: ExampleBundleResult) -> None:
-    webbrowser.open((repo_root / "exports" / result.preview_name).resolve().as_uri())
+def open_import_report(repo_root: Path, result: StarterImportResult) -> None:
+    webbrowser.open((repo_root / "exports" / result.report_name).resolve().as_uri())
 
 
 def _source_from_spec(spec: Dict[str, Any], profile: str, feed_url: str) -> Source:

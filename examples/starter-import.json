@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "title": "Independent feeds starter bundle",
+  "title": "Independent feeds starter import",
   "description": "Eight public sources that demonstrate direct publisher feeds, official YouTube feeds, Substack, and locally generated Bandcamp RSS.",
   "sources": [
     {

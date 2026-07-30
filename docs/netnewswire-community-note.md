@@ -14,7 +14,7 @@ Always name NetNewsWire accurately, link to its website and repository, and do n
 
 I use NetNewsWire as my reader because it gets me out of algorithmic feeds and back to a deliberate list of sources. I have been building an independent, local-first companion tool called **NetNewsWire-Feed-Booster** that keeps source metadata, exports OPML, and can generate standard RSS for a few sources that do not offer a useful first-party feed (music pages are the main case so far).
 
-The goal is deliberately modest: NetNewsWire remains the reader. This tool helps turn a person’s chosen sources into normal, portable feeds they can import and control. It does not store articles, scrape private accounts, or make upstream subscription changes. Private URLs and tokens stay local.
+The goal is deliberately modest. Read and manage subscriptions in NetNewsWire. This tool turns a person’s chosen sources into normal, portable feeds they can import and control. It does not store articles, scrape private accounts, or make upstream subscription changes. Private URLs and tokens stay local.
 
 I am sharing it as an MIT-licensed reference implementation and would value community feedback on two questions:
 

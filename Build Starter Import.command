@@ -10,13 +10,13 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! ./scripts/create_example_feed.sh starter --open; then
+if ! ./scripts/build_starter_import.sh starter --open; then
   echo
-  echo "The starter bundle was not changed. Read the message above for the exact reason."
+  echo "The starter import was not changed. Read the message above for the exact reason."
   read -r -p "Press Return to close."
   exit 1
 fi
 
 echo
-echo "The preview opened in your browser. Nothing was imported into NetNewsWire."
+echo "The import report opened in your browser. Nothing was imported into NetNewsWire."
 read -r -p "Press Return to close."

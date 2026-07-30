@@ -8,7 +8,7 @@ Reddit is usually a direct-feed case rather than an adapter case. Use its public
 
 Every generated source belongs in `generated_adapters.py`. An adapter must define:
 
-- A single `source_label` for persisted source metadata.
+- A primary `source_label` for persisted source metadata and any deliberate legacy labels.
 - An exact public source URL shape, validated before any fetch.
 - The approved upstream host or suffix allowlist.
 - A deterministic upstream request URL.
@@ -33,11 +33,27 @@ https://api.mixcloud.com/example/cloudcasts/?limit=100
 
 Its allowlist contains only `api.mixcloud.com`. Profile URLs with an extra path, query string, credentials, a non-HTTPS scheme, or another host are rejected before a fetch or deployment can use them.
 
+## Webpage Recipe Example
+
+Do not create a full provider adapter when the reusable behavior is “turn one difficult public page into RSS.” Add a `WebpageFeedRecipe` in `webpage_recipes.py` instead.
+
+Each recipe defines:
+
+- The exact public site hosts and path prefixes it accepts.
+- Whether a query string is part of the supported public page.
+- The item and image hosts its parser may emit.
+- A parser that returns normalized feed items.
+- Date formatting for that page.
+
+`WEBPAGE_ADAPTER` owns the shared fetch and RSS-rendering path. Each recipe declares its exact fetch hosts and builds the upstream URL. The HydeFM recipe fetches its public archive page directly. A future recipe may use another reviewed public representation, but it must name the exact fetch hosts. An arbitrary URL never becomes a fetch target.
+
+HydeFM archives are the first recipe because the page has stable public updates but no useful native feed for this workflow. Add the next difficult website as another recipe. Do not copy the shared rendering, URL validation, or fetch-policy logic into a site-named module.
+
 ## Implementation Checklist
 
 1. Confirm that the source has no useful native feed with `discover-feed` and document why a generated feed is justified.
 2. Check the source's public terms, rate limits, and access controls. Do not add authenticated, paid, private, or anti-bot-bypass sources.
-3. Add the adapter and a source-specific CLI command that writes only to ignored profile data.
+3. Choose the smallest extension: a webpage recipe for a difficult public page, or a full adapter for a stable provider API/source family.
 4. Add a synthetic or openly shareable parser fixture. Never commit an individual's subscriptions, OPML, tokens, cookies, or saved account pages.
 5. Test rejected URL shapes, the approved upstream allowlist, RSS output, OPML rewriting, and cache-only reader behavior.
 6. Update `docs/source-types.md`, `docs/operations.md`, and this guide with the source's polling and privacy implications.

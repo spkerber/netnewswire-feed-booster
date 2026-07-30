@@ -9,7 +9,7 @@ IMPORT_OPML ?= imports/netnewswire.opml
 EXPORT_OPML ?= exports/$(PROFILE)-netnewswire.opml
 CLI := PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m netnewswire_feed_booster --data $(DATA) --history $(HISTORY)
 
-.PHONY: help test example-feed list import export hosted-export modal-deploy publish-netnewswire unfollows history
+.PHONY: help test starter-import list import export hosted-export modal-deploy publish-netnewswire unfollows history
 
 help:
 	$(CLI) --help
@@ -17,8 +17,8 @@ help:
 test:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m unittest discover -s tests
 
-example-feed:
-	./scripts/create_example_feed.sh $(PROFILE)
+starter-import:
+	./scripts/build_starter_import.sh $(PROFILE)
 
 list:
 	$(CLI) list --profile $(PROFILE)

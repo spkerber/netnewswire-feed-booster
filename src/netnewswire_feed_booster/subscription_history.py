@@ -17,11 +17,14 @@ VALID_HISTORY_STATUSES = {
 }
 
 
-def default_subscription_history_path(profile: str = "") -> Path:
+def default_subscription_history_path(profile: str = "", *, prefer_configured: bool = False) -> Path:
     configured = os.environ.get("RSS_HISTORY_FILE")
-    if configured:
+    if configured and (prefer_configured or not profile):
         return Path(configured)
-    profile = profile or os.environ.get("RSS_PROFILE", "")
+    if profile:
+        profile = validate_profile_id(profile)
+        return repo_root() / "data" / f"subscription-history.{profile}.json"
+    profile = os.environ.get("RSS_PROFILE", "")
     if profile:
         profile = validate_profile_id(profile)
         return repo_root() / "data" / f"subscription-history.{profile}.json"

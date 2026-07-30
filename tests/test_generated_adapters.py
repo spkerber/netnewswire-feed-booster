@@ -4,8 +4,10 @@ from unittest.mock import patch
 from netnewswire_feed_booster.feed_store import Source
 from netnewswire_feed_booster.generated_adapters import (
     BANDCAMP_ADAPTER,
+    HYDEFM_ADAPTER,
     MIXCLOUD_ADAPTER,
     NTS_ADAPTER,
+    WEBPAGE_ADAPTER,
     adapter_for_source,
     configured_bandcamp_redirect_hosts,
 )
@@ -49,6 +51,51 @@ class GeneratedAdapterTests(unittest.TestCase):
         NTS_ADAPTER.validate(nts)
         with self.assertRaises(ValueError):
             MIXCLOUD_ADAPTER.validate(mixcloud)
+
+    def test_webpage_adapter_uses_registered_recipes_and_keeps_legacy_sources_working(self) -> None:
+        current = Source(
+            id="webpage-hydefm",
+            title="HydeFM Archives",
+            feed_url="file:///tmp/hydefm.rss",
+            site_url="https://hydefm.com/archives/",
+            source="webpage-local-generated",
+        )
+        legacy = Source(
+            id="radio-hydefm-archives",
+            title="HydeFM Archives",
+            feed_url="file:///tmp/hydefm.rss",
+            site_url="https://hydefm.com/archives/",
+            source="radio-local-generated",
+        )
+        unsupported = Source(
+            id="arbitrary-webpage",
+            title="Arbitrary webpage",
+            feed_url="file:///tmp/arbitrary.rss",
+            site_url="https://metadata.example/archive/",
+            source="webpage-local-generated",
+        )
+
+        self.assertIs(adapter_for_source(current), WEBPAGE_ADAPTER)
+        self.assertIs(adapter_for_source(legacy), WEBPAGE_ADAPTER)
+        self.assertIsNone(adapter_for_source(unsupported))
+        self.assertEqual(
+            WEBPAGE_ADAPTER.upstream_url(current),
+            "https://hydefm.com/archives/",
+        )
+        self.assertEqual(
+            WEBPAGE_ADAPTER.allowed_hosts_for(current),
+            frozenset({"hydefm.com", "www.hydefm.com"}),
+        )
+        HYDEFM_ADAPTER.validate(legacy)
+        self.assertIsNot(HYDEFM_ADAPTER, WEBPAGE_ADAPTER)
+        self.assertEqual(
+            HYDEFM_ADAPTER.allowed_hosts,
+            frozenset({"hydefm.com", "www.hydefm.com"}),
+        )
+        self.assertEqual(
+            HYDEFM_ADAPTER.upstream_url(legacy),
+            "https://hydefm.com/archives/",
+        )
 
     def test_hosted_export_rewrites_only_recognized_generated_sources(self) -> None:
         unsafe = Source(

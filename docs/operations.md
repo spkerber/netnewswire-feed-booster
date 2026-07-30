@@ -51,9 +51,11 @@ python3 -m netnewswire_feed_booster audit-sources --profile "$RSS_PROFILE" --lim
 python3 -m netnewswire_feed_booster subscribe-bandcamp-source https://artist.bandcamp.com/ --profile "$RSS_PROFILE"
 python3 -m netnewswire_feed_booster refresh-bandcamp-local-feeds --profile "$RSS_PROFILE"
 python3 -m netnewswire_feed_booster subscribe-nts-show https://www.nts.live/shows/example --profile "$RSS_PROFILE"
-python3 -m netnewswire_feed_booster subscribe-hydefm-archive --profile "$RSS_PROFILE"
 python3 -m netnewswire_feed_booster subscribe-mixcloud-profile https://www.mixcloud.com/example/ --profile "$RSS_PROFILE"
+python3 -m netnewswire_feed_booster subscribe-webpage-feed https://hydefm.com/archives/ --profile "$RSS_PROFILE"
 ```
+
+`subscribe-webpage-feed` accepts only pages with a registered, allowlisted recipe. HydeFM is the current reference recipe. The older `subscribe-hydefm-archive` command remains as a compatibility shortcut.
 
 After adding or removing a generated source on an already configured Modal host, redeploy the hosted bridge, then export hosted OPML:
 

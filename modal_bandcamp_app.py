@@ -113,19 +113,19 @@ def _validator_headers(source_id: str) -> dict[str, str]:
     return headers
 
 
-def _fetch_source_text(source_id: str, url: str, adapter) -> Optional[str]:
+def _fetch_source_text(source, url: str, adapter) -> Optional[str]:
     from netnewswire_feed_booster.http_client import fetch_text_response
 
     response = fetch_text_response(
         url,
-        request_headers=_validator_headers(source_id),
-        allowed_hosts=adapter.allowed_hosts,
-        allowed_suffixes=adapter.allowed_suffixes,
+        request_headers=_validator_headers(source.id),
+        allowed_hosts=adapter.allowed_hosts_for(source),
+        allowed_suffixes=adapter.allowed_suffixes_for(source),
     )
     if response.not_modified:
         return None
     VALIDATOR_DIR.mkdir(parents=True, exist_ok=True)
-    _validator_path(source_id).write_text(
+    _validator_path(source.id).write_text(
         json.dumps({"etag": response.etag, "last_modified": response.last_modified}),
         encoding="utf-8",
     )
@@ -217,7 +217,7 @@ def _refresh_source(source) -> str:
     adapter = adapter_for_source(source)
     if adapter is None:
         raise ValueError(f"Generated source is not refreshable: {source.id}")
-    html = _fetch_source_text(source.id, adapter.upstream_url(source), adapter)
+    html = _fetch_source_text(source, adapter.upstream_url(source), adapter)
     if html is None:
         rss = _read_cached_or_seeded_rss(source.id)
         if rss is None:
@@ -243,7 +243,7 @@ def _refresh_generated_source(source) -> str:
     adapter = adapter_for_source(source)
     if adapter is None:
         raise ValueError(f"Generated source is not refreshable: {source.id}")
-    content = _fetch_source_text(source.id, adapter.upstream_url(source), adapter)
+    content = _fetch_source_text(source, adapter.upstream_url(source), adapter)
     if content is None:
         rss = _read_cached_or_seeded_generated_rss(source.id)
         if rss is None:

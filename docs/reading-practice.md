@@ -2,14 +2,14 @@
 
 NetNewsWire Feed Booster is designed for deliberate catch-up, not real-time alerts. The default hosted bridge favors predictable provider load, low Modal usage, and a compact cache over minute-by-minute updates.
 
-NetNewsWire remains the reading environment. Use its read-later, starred, folder, and sync features to decide what stays in your attention. This project only maintains subscriptions and current generated feeds.
+Read in NetNewsWire. Use its read-later, starred, folder, and sync features to decide what stays in your attention. This project only maintains subscriptions and current generated feeds.
 
 ## What Refreshes Where
 
 | Source type | Who fetches it | What you can tune here |
 | --- | --- | --- |
 | Native RSS, Atom, or JSON Feed | Your reader, directly from the publisher | Nothing in the bridge. Keep it direct. |
-| Generated Bandcamp, NTS, HydeFM, or Mixcloud feed | The optional HTTPS bridge | Refresh cadence, per-run batch size, and retained RSS items. |
+| Generated Bandcamp, NTS, Mixcloud, or webpage-recipe feed | The optional HTTPS bridge | Refresh cadence, per-run batch size, and retained RSS items. |
 
 Direct feeds may still update at the cadence NetNewsWire chooses. The bridge never proxies them, so it does not add latency, cost, or another failure point.
 
