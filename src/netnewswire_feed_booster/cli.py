@@ -167,6 +167,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         help="Fan source ID to refresh without the fan item cap; can be passed multiple times",
     )
+    bandcamp_local_parser.add_argument("--show-sensitive", action="store_true")
 
     generated_local_parser = subparsers.add_parser(
         "refresh-generated-local-feeds",
@@ -174,6 +175,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     generated_local_parser.add_argument("--profile", default=DEFAULT_PROFILE)
     generated_local_parser.add_argument("--out-dir", type=Path, default=Path("exports/generated"))
+    generated_local_parser.add_argument("--show-sensitive", action="store_true")
 
     bandcamp_source_parser = subparsers.add_parser("subscribe-bandcamp-source", help="Add or reactivate a Bandcamp artist/label or fan source and generate its local RSS")
     bandcamp_source_parser.add_argument("url")
@@ -185,6 +187,7 @@ def build_parser() -> argparse.ArgumentParser:
     bandcamp_source_parser.add_argument("--fan-max-items", type=int, default=40)
     bandcamp_source_parser.add_argument("--max-items", type=int, default=50, help="Maximum RSS items retained for this source")
     bandcamp_source_parser.add_argument("--no-refresh", action="store_true", help="Only update registry metadata; do not fetch Bandcamp or write local RSS")
+    bandcamp_source_parser.add_argument("--show-sensitive", action="store_true")
 
     podcast_parser = subparsers.add_parser("subscribe-podcast", help="Subscribe to a podcast from an RSS URL or Apple Podcasts URL")
     podcast_parser.add_argument("url")
@@ -227,6 +230,7 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         choices=["rss_unsubscribed", "external_unfollow_needed", "external_unfollow_confirmed", "ignored"],
     )
+    history_status_parser.add_argument("--profile", default=DEFAULT_PROFILE)
 
     reconcile_parser = subparsers.add_parser("reconcile-netnewswire", help="Compare a NetNewsWire OPML export against repo intent")
     reconcile_parser.add_argument("path", type=Path)
@@ -290,10 +294,27 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     profile = getattr(args, "profile", None) or os.environ.get("RSS_PROFILE", "")
+    data_was_explicit = args.data is not None
     if args.data is None:
-        args.data = default_sources_path(profile)
+        try:
+            args.data = default_sources_path(profile)
+        except ValueError as error:
+            parser.error(str(error))
     if args.history is None:
-        args.history = default_subscription_history_path(profile)
+        try:
+            args.history = default_subscription_history_path(profile)
+        except ValueError as error:
+            parser.error(str(error))
+    if (
+        profile
+        and not data_was_explicit
+        and args.command != "discover-feed"
+        and not args.data.exists()
+    ):
+        parser.error(
+            f"Missing private profile files for RSS_PROFILE={profile}. "
+            f"Run ./scripts/bootstrap_profile.sh {profile} first."
+        )
     store = FeedStore(args.data)
     private_store = FeedStore(args.private_data)
     history_store = SubscriptionHistoryStore(args.history)
@@ -302,7 +323,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         sources = parse_opml(args.path, profile=args.profile)
         store.add_or_update_many(sources)
         store.save()
-        print(f"Imported {len(sources)} sources into {args.data}")
+        print(f"Imported {len(sources)} sources.")
         return 0
 
     if args.command == "migrate-generated-sources":
@@ -329,7 +350,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             return 0
         apply_generated_source_migration(store, migration)
         print(
-            f"Applied generated-source migration in {args.data}: "
+            "Applied generated-source migration: "
             f"rebuilt {migration.total}, removed duplicates {len(migration.removals)}"
         )
         return 0
@@ -342,7 +363,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             sources = sources_with_hosted_bandcamp_feeds(sources, args.bandcamp_feed_base, token=args.bandcamp_feed_token)
         title = args.title or f"netnewswire-feed-booster: {args.profile}"
         write_opml(args.out, sources, title=title)
-        print(f"Exported {len(sources)} active sources to {args.out}")
+        print(f"Exported {len(sources)} active sources.")
         return 0
 
     if args.command == "list":
@@ -391,7 +412,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         source_id = store.add_or_update(source)
         store.set_status(source_id, "active")
         store.save()
-        print(f"Subscribed Substack source {source_id}: {source.feed_url}")
+        print(f"Subscribed Substack source {source_id}.")
         return 0
 
     if args.command == "subscribe-youtube":
@@ -411,7 +432,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         source_id = store.add_or_update(source)
         store.set_status(source_id, "active")
         store.save()
-        print(f"Subscribed YouTube source {source_id}: {feed_url}")
+        print(f"Subscribed YouTube source {source_id}.")
         return 0
 
     if args.command == "import-youtube-channel-url":
@@ -419,7 +440,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         source = parse_youtube_channel_html(html, profile=args.profile, group=args.group, fallback_title=args.title)
         source_id = store.add_or_update(source)
         store.save()
-        print(f"Saved YouTube source {source_id}: {source.feed_url}")
+        print(f"Saved YouTube source {source_id}.")
         return 0
 
     if args.command == "import-youtube-subscriptions":
@@ -427,7 +448,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         for source in sources:
             store.add_or_update(source)
         store.save()
-        print(f"Imported {len(sources)} YouTube subscriptions into {args.data}")
+        print(f"Imported {len(sources)} YouTube subscriptions.")
         return 0
 
     if args.command == "import-substack-profile":
@@ -436,7 +457,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         for source in sources:
             store.add_or_update(source)
         store.save()
-        print(f"Imported {len(sources)} public Substack subscriptions into {args.data}")
+        print(f"Imported {len(sources)} public Substack subscriptions.")
         return 0
 
     if args.command == "import-substack-library":
@@ -445,7 +466,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         for source in sources:
             store.add_or_update(source)
         store.save()
-        print(f"Imported {len(sources)} Substack library subscriptions into {args.data}")
+        print(f"Imported {len(sources)} Substack library subscriptions.")
         return 0
 
     if args.command == "import-soundcloud-following":
@@ -453,7 +474,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         for source in sources:
             store.add_or_update(source)
         store.save()
-        print(f"Imported {len(sources)} SoundCloud following sources into {args.data}")
+        print(f"Imported {len(sources)} SoundCloud following sources.")
         return 0
 
     if args.command == "subscribe-nts-show":
@@ -490,7 +511,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         changed_id = store.add_or_update(source)
         store.set_status(changed_id, "active")
         store.save()
-        print(f"Subscribed NTS show {changed_id}: {source.feed_url}")
+        print(f"Subscribed NTS show {changed_id}.")
         return 0
 
     if args.command == "subscribe-hydefm-archive":
@@ -527,7 +548,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         changed_id = store.add_or_update(source)
         store.set_status(changed_id, "active")
         store.save()
-        print(f"Subscribed HydeFM archive {changed_id}: {source.feed_url}")
+        print(f"Subscribed HydeFM archive {changed_id}.")
         return 0
 
     if args.command == "subscribe-mixcloud-profile":
@@ -549,7 +570,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         changed_id = store.add_or_update(source)
         store.set_status(changed_id, "active")
         store.save()
-        print(f"Subscribed Mixcloud profile {changed_id}: {source.feed_url}")
+        print(f"Subscribed Mixcloud profile {changed_id}.")
         return 0
 
     if args.command == "refresh-bandcamp-local-feeds":
@@ -584,7 +605,8 @@ def main(argv: Optional[list[str]] = None) -> int:
                 )
                 if not items:
                     failed += 1
-                    print(f"FAILED\t{source.id}\tNo items found\t{source.site_url}")
+                    detail = source.site_url if args.show_sensitive else "[details redacted; use --show-sensitive]"
+                    print(f"FAILED\t{source.id}\tNo items found\t{detail}")
                     continue
 
                 out_path = args.out_dir / f"{source.id}.rss"
@@ -593,10 +615,15 @@ def main(argv: Optional[list[str]] = None) -> int:
                 source.source = "bandcamp-local-generated"
                 source.notes = "Generated local RSS feed from the saved Bandcamp source page because OpenRSS did not mirror this Bandcamp feed reliably."
                 updated += 1
-                print(f"UPDATED\t{source.id}\t{len(items)} items\t{source.feed_url}")
+                print(f"UPDATED\t{source.id}\t{len(items)} items")
             except Exception as error:
                 failed += 1
-                print(f"FAILED\t{source.id}\t{type(error).__name__}: {error}\t{source.site_url}")
+                detail = (
+                    f"{type(error).__name__}: {error}\t{source.site_url}"
+                    if args.show_sensitive
+                    else f"{type(error).__name__}\t[details redacted; use --show-sensitive]"
+                )
+                print(f"FAILED\t{source.id}\t{detail}")
 
         store.set_sources(sources)
         store.save()
@@ -627,10 +654,15 @@ def main(argv: Optional[list[str]] = None) -> int:
                 out_path.write_text(rss, encoding="utf-8")
                 source.feed_url = out_path.resolve().as_uri()
                 updated += 1
-                print(f"UPDATED\t{source.id}\t{source.feed_url}")
+                print(f"UPDATED\t{source.id}")
             except Exception as error:
                 failed += 1
-                print(f"FAILED\t{source.id}\t{type(error).__name__}: {error}\t{source.site_url}")
+                detail = (
+                    f"{type(error).__name__}: {error}\t{source.site_url}"
+                    if args.show_sensitive
+                    else f"{type(error).__name__}\t[details redacted; use --show-sensitive]"
+                )
+                print(f"FAILED\t{source.id}\t{detail}")
         store.set_sources(sources)
         store.save()
         print(f"Updated local generated feeds: {updated}")
@@ -663,12 +695,12 @@ def main(argv: Optional[list[str]] = None) -> int:
             out_path.parent.mkdir(parents=True, exist_ok=True)
             out_path.write_text(rss, encoding="utf-8")
             source.feed_url = out_path.resolve().as_uri()
-            print(f"Generated local Bandcamp RSS for {source.id}: {out_path}")
+            print(f"Generated local Bandcamp RSS for {source.id}.")
 
         source_id = store.add_or_update(source)
         store.set_status(source_id, "active")
         store.save()
-        print(f"Subscribed Bandcamp source {source_id}: {source.feed_url}")
+        print(f"Subscribed Bandcamp source {source_id}.")
         return 0
 
     if args.command == "subscribe-podcast":
@@ -677,8 +709,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         source_id = target_store.add_or_update(source)
         target_store.set_status(source_id, "active")
         target_store.save()
-        destination = args.private_data if args.private else args.data
-        print(f"Subscribed podcast source {source_id} into {destination}")
+        destination = "private overlay" if args.private else "profile registry"
+        print(f"Subscribed podcast source {source_id} into the {destination}.")
         return 0
 
     if args.command == "set-status":

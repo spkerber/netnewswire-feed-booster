@@ -27,7 +27,7 @@ git add .
 git status --short
 ```
 
-The script copies tracked reusable files while excluding personal profiles and rewrites the public README title. It refuses to write into an existing directory. Review every staged file before the first commit.
+The script copies only tracked reusable files while excluding personal profiles. It refuses to write into an existing directory. Review every staged file before the first commit.
 
 The public copy's `.gitignore` also ignores profile-specific `sources`, `subscription-history`, and `profiles` files so a new user's live registry does not become a default commit candidate.
 
@@ -37,8 +37,8 @@ The public copy's `.gitignore` also ignores profile-specific `sources`, `subscri
 2. Run `./scripts/verify_public_template.sh`.
 3. Confirm `git status --ignored --short` shows no personal data staged for the public copy.
 4. Search the public copy for names, hostnames, feed tokens, and personal paths.
-5. Add the public repository URL to the README and community-note placeholders.
-6. Create a GitHub repository named `NetNewsWire-Feed-Booster`, set the MIT license, and publish only the reviewed public-copy directory.
+5. Confirm the repository URL, screenshots, badges, and community note all resolve from a clean candidate.
+6. Publish only the reviewed public-copy directory, then create a signed or annotated version tag and GitHub release.
 
 ## Support boundary
 

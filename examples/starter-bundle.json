@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "title": "Independent feeds starter bundle",
+  "description": "Eight public sources that demonstrate direct publisher feeds, official YouTube feeds, Substack, and locally generated Bandcamp RSS.",
+  "sources": [
+    {
+      "id": "pitchfork-album-reviews",
+      "title": "Pitchfork Album Reviews",
+      "delivery": "direct",
+      "kind": "website",
+      "feed_url": "https://pitchfork.com/feed/feed-album-reviews/rss",
+      "site_url": "https://pitchfork.com/reviews/albums/",
+      "group": "Music & Culture"
+    },
+    {
+      "id": "no-bells",
+      "title": "No Bells",
+      "delivery": "direct",
+      "kind": "website",
+      "feed_url": "https://nobells.blog/feed/",
+      "site_url": "https://nobells.blog/",
+      "group": "Music & Culture"
+    },
+    {
+      "id": "hasanabi",
+      "title": "HasanAbi",
+      "delivery": "direct",
+      "kind": "youtube",
+      "feed_url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCtoaZpBnrd0lhycxYJ4MNOQ",
+      "site_url": "https://www.youtube.com/@HasanAbi",
+      "group": "News & Analysis"
+    },
+    {
+      "id": "breaking-points",
+      "title": "Breaking Points",
+      "delivery": "direct",
+      "kind": "youtube",
+      "feed_url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCDRIjKy6eZOvKtOELtTdeUA",
+      "site_url": "https://www.youtube.com/@breakingpoints",
+      "group": "News & Analysis"
+    },
+    {
+      "id": "drop-site-news",
+      "title": "Drop Site News",
+      "delivery": "direct",
+      "kind": "substack",
+      "feed_url": "https://www.dropsitenews.com/feed",
+      "site_url": "https://www.dropsitenews.com/",
+      "group": "News & Analysis"
+    },
+    {
+      "id": "bandcamp-dark-entries-records",
+      "title": "Bandcamp: Dark Entries Records",
+      "delivery": "generated",
+      "kind": "bandcamp",
+      "site_url": "https://darkentriesrecords.bandcamp.com/",
+      "group": "Music & Labels"
+    },
+    {
+      "id": "bandcamp-cone-shape-top-imprint",
+      "title": "Bandcamp: Cone Shape Top Imprint",
+      "delivery": "generated",
+      "kind": "bandcamp",
+      "site_url": "https://coneshapetopimprint.bandcamp.com/",
+      "group": "Music & Labels"
+    },
+    {
+      "id": "bandcamp-no-bias",
+      "title": "Bandcamp: NO BIAS",
+      "delivery": "generated",
+      "kind": "bandcamp",
+      "site_url": "https://nobias.bandcamp.com/",
+      "group": "Music & Labels"
+    }
+  ]
+}

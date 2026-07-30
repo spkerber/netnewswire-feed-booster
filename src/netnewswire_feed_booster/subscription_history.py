@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
-from .feed_store import Source, repo_root, slugify, today_iso
+from .feed_store import Source, repo_root, slugify, today_iso, validate_profile_id
 
 
 VALID_HISTORY_STATUSES = {
@@ -23,9 +23,8 @@ def default_subscription_history_path(profile: str = "") -> Path:
         return Path(configured)
     profile = profile or os.environ.get("RSS_PROFILE", "")
     if profile:
-        profile_path = repo_root() / "data" / f"subscription-history.{profile}.json"
-        if profile_path.exists():
-            return profile_path
+        profile = validate_profile_id(profile)
+        return repo_root() / "data" / f"subscription-history.{profile}.json"
     return repo_root() / "data" / "subscription-history.json"
 
 

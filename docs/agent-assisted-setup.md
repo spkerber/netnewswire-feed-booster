@@ -54,7 +54,7 @@ Never give an agent a provider password, MFA code, GitHub personal access token,
 ## First-Time Setup
 
 ```bash
-git clone <public-repository-url> my-rss-stack
+git clone https://github.com/spkerber/netnewswire-feed-booster.git my-rss-stack
 cd my-rss-stack
 export PYTHONPATH=src
 ./scripts/bootstrap_profile.sh me

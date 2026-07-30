@@ -34,7 +34,7 @@ For accepted URLs and source-export formats, including Google Takeout's YouTube 
 
 Use `add` only for a direct feed that does not have a source-specific command. Exact source identifiers may be source IDs, site URLs, feed URLs, or unique titles. Folder names are personal: use `set-folder` only if you want portable OPML folders, and choose the structure yourself.
 
-Human-readable source commands redact feed URLs by default. Use `--show-sensitive` only for a local inspection and never paste that output: generated-feed URLs contain the access token.
+Human-readable source and refresh commands redact feed URLs, local paths, and failure details by default. Use `--show-sensitive` only for a local inspection and never paste that output: generated-feed URLs can contain a local checkout path or access token. `discover-feed` is the deliberate exception because returning the discovered public feed URL is its purpose.
 
 ## Discovery And Audit
 

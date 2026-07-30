@@ -408,6 +408,7 @@ def web():
 
 @app.function(
     image=image,
+    secrets=[modal.Secret.from_name(MODAL_SECRET_NAME)],
     volumes={str(CACHE_ROOT): cache_volume},
     schedule=modal.Period(hours=REFRESH_SCHEDULE_HOURS),
     timeout=900,

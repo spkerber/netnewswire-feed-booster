@@ -16,6 +16,7 @@ imports/*.html
 imports/*.htm
 exports/*.opml
 exports/*.rss
+exports/*.html
 exports/bandcamp/
 exports/generated/*
 data/private-sources.json

@@ -3,7 +3,7 @@
   "sources": [
     {
       "added_at": "2026-01-01",
-      "feed_url": "https://oneusefulthing.org/feed",
+      "feed_url": "https://www.oneusefulthing.org/feed",
       "groups": [
         "Substack"
       ],
@@ -14,7 +14,7 @@
       "profiles": [
         "me"
       ],
-      "site_url": "https://oneusefulthing.org",
+      "site_url": "https://www.oneusefulthing.org",
       "source": "example",
       "status": "active",
       "tags": [],

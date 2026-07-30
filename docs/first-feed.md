@@ -1,17 +1,41 @@
 # First Feed: From Link To Loaded Item
 
-Start here if you want to prove RSS works before importing a large source list, setting up a host, or using iCloud. This guide deliberately uses one public, direct YouTube feed. You do not need Modal, a token, or a coding agent.
+Start here if you want to see the complete product before importing your own source list, setting up a host, or using iCloud. The starter bundle uses eight public sources and writes only ignored local files. You do not need Modal, a token, or a coding agent.
 
 ```mermaid
 flowchart LR
-    A["Install NetNewsWire"] --> B["Use built-in On My Mac"]
-    B --> C["Add one public direct feed"]
-    C --> D{"Title appears and items load?"}
-    D -->|"Yes"| E["Success: stop here or add more"]
-    D -->|"No"| F["Use troubleshooting below\nDo not deploy a host"]
+    A["Create public starter bundle"] --> B["Review generated preview"]
+    B --> C{"Want these examples in NetNewsWire?"}
+    C -->|"Yes"| D["Import OPML into On My Mac"]
+    C -->|"No"| E["Stop; nothing was imported"]
+    D --> F["Confirm folders and items load"]
 ```
 
-## Option A: No Terminal
+## Option A: Double-Click The Product
+
+This route exercises the real source registry, feed validation, generated Bandcamp adapters, and OPML export.
+
+1. Download the repository ZIP from [GitHub](https://github.com/spkerber/netnewswire-feed-booster), then unzip it.
+2. Confirm `python3 --version` reports Python 3.9 or later. If you are unsure, double-clicking the file below will give you a direct error instead of changing anything.
+3. Double-click **Start Example Feed.command** in the unzipped folder.
+4. Wait while it validates five direct public feeds and generates RSS for three public Bandcamp label pages.
+5. Review the page that opens.
+
+![Generated starter bundle preview with direct and locally generated feeds](images/starter-bundle-preview.png)
+
+The command creates an ignored `starter` profile, an HTML preview, three local RSS files, and `exports/starter-netnewswire.opml`. It does not open or alter NetNewsWire. If the profile already exists, it stops rather than overwriting it.
+
+To try the import:
+
+1. Open NetNewsWire and use its built-in **On My Mac** account.
+2. Choose **File > Import Subscriptions...**.
+3. Select `starter-netnewswire.opml` from this repository’s `exports/` folder.
+4. Confirm these three folders appear: **Music & Culture**, **News & Analysis**, and **Music & Labels**.
+5. Select a direct feed and a Bandcamp feed and confirm items load.
+
+NetNewsWire’s [OPML import guide](https://netnewswire.com/help/mac/6.0/en/import-opml.html) confirms that importing adds subscriptions to the account you select. It does not replace another account or delete existing feeds.
+
+## Option B: One Native Feed, No Product Setup
 
 1. Download and open [NetNewsWire](https://netnewswire.com/).
 2. Use its built-in **On My Mac** account. You do not need to add an account to read on one Mac. Add iCloud later only if you want synced subscriptions and reading state across Apple devices. See NetNewsWire’s [getting-started guide](https://netnewswire.com/help/mac/6.1/en/getting-started.html).
@@ -24,59 +48,19 @@ https://www.youtube.com/feeds/videos.xml?channel_id=UC_x5XG1OV2P6uZZ5FSM9Ttw
 4. In NetNewsWire, click `+`, choose **New Web Feed**, paste the URL, and add it to **On My Mac**.
 5. Select the new feed in the sidebar. Its title should appear and it should load items after a short wait.
 
-That is the first-success checkpoint. If it works, RSS and NetNewsWire are ready. You can keep adding direct feeds in the GUI, or continue with this repository when you want a portable registry, a bulk OPML cleanup, or a supported generated source.
+That is a NetNewsWire-only checkpoint. It proves the reader can load a native feed, but it does not exercise Feed Booster.
 
-## Option B: First Feed Through This Repository
+## Option C: Terminal
 
-Use this path when you want to see the complete local-registry-to-OPML-to-NetNewsWire workflow before importing your real sources.
-
-### 1. Get a Local Copy
-
-With Git and Terminal:
+Run the same eight-source starter workflow from a shell:
 
 ```bash
-git clone <repository-url> my-rss-stack
-cd my-rss-stack
-python3 --version
+git clone https://github.com/spkerber/netnewswire-feed-booster.git
+cd netnewswire-feed-booster
+./scripts/create_example_feed.sh starter --open
 ```
 
-On the GitHub page you opened, use **Code > Local** to copy its HTTPS clone URL and replace `<repository-url>`. Python must report version 3.9 or later. If you do not use Git, download the repository ZIP from GitHub, unzip it in Finder, and open that folder in Terminal or a local coding harness. The command steps below are the same once you are inside the unzipped folder.
-
-### 2. Create a New Private Profile
-
-```bash
-export PYTHONPATH=src
-./scripts/bootstrap_profile.sh first
-export RSS_PROFILE=first
-```
-
-Do **not** add `--force` during ordinary setup. The script refuses to overwrite a profile so that your private registry cannot be replaced by accident.
-
-### 3. Add One Direct Feed and Export OPML
-
-```bash
-PYTHONPATH=src python3 -m netnewswire_feed_booster \
-  --data "data/sources.${RSS_PROFILE}.json" \
-  subscribe-youtube UC_x5XG1OV2P6uZZ5FSM9Ttw \
-  --title "Google Developers" --profile "$RSS_PROFILE"
-
-PYTHONPATH=src python3 -m netnewswire_feed_booster \
-  --data "data/sources.${RSS_PROFILE}.json" \
-  export-opml --profile "$RSS_PROFILE" \
-  --out "exports/${RSS_PROFILE}-netnewswire.opml"
-```
-
-This path does not fetch or validate the feed. It writes only an ignored private registry and an ignored local OPML export. The reader will fetch the public feed after you import it.
-
-### 4. Import the Candidate Into NetNewsWire
-
-1. In Finder, open your `my-rss-stack` folder, then open `exports/`.
-2. In NetNewsWire, choose **File > Import Subscriptions...**.
-3. Select **On My Mac** as the target account.
-4. Choose `first-netnewswire.opml` from `exports/`.
-5. Confirm **Google Developers** appears in the **On My Mac** sidebar, select it, and wait for items to load.
-
-NetNewsWire’s [OPML import guide](https://netnewswire.com/help/mac/6.0/en/import-opml.html) confirms that importing adds subscriptions to the selected account. It does not replace your other account or delete its feeds.
+For your own private source list, continue with the [Terminal Workflow](setup.md#terminal-workflow). Create a different profile rather than repurposing the public starter.
 
 ## When To Use iCloud
 
@@ -92,6 +76,9 @@ OPML moves subscription lists and folders, not your old local read/unread histor
 
 | What you see | What to do |
 | --- | --- |
+| `Start Example Feed.command` will not open | Control-click it, choose **Open**, and confirm. macOS may ask once because it came from a downloaded ZIP. |
+| The starter profile already exists | Stop and review it. Use a different profile name from Terminal; use `--force` only when intentionally replacing the public example files. |
+| A public validation request fails | The script leaves the existing profile untouched. Check your connection, then retry; upstream sites can be temporarily unavailable. |
 | The feed title does not appear | Confirm you selected **On My Mac**, then try adding the direct URL again. Do not set up Modal. |
 | The title appears but no items yet | Keep the feed selected briefly, then refresh NetNewsWire. Public feeds can have no recent items or a temporary upstream delay. |
 | `python3` is missing or older than 3.9 | Use the GUI-only path, install a current Python, or ask a local coding agent to perform the terminal workflow. |

@@ -12,8 +12,21 @@ from typing import Any, Dict, Iterable, List, Optional
 
 VALID_STATUSES = {"active", "candidate", "paused", "unsubscribed"}
 VALID_KINDS = {"website", "substack", "youtube", "bandcamp", "newsletter", "podcast", "other"}
+PROFILE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+
+
 def repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
+
+
+def validate_profile_id(profile: str) -> str:
+    profile = profile.strip()
+    if not PROFILE_ID_PATTERN.fullmatch(profile):
+        raise ValueError(
+            "Profile IDs must start with a letter or number and contain only "
+            "letters, numbers, hyphens, or underscores (64 characters maximum)."
+        )
+    return profile
 
 
 def default_sources_path(profile: str = "") -> Path:
@@ -22,9 +35,8 @@ def default_sources_path(profile: str = "") -> Path:
         return Path(configured)
     profile = profile or os.environ.get("RSS_PROFILE", "")
     if profile:
-        profile_path = repo_root() / "data" / f"sources.{profile}.json"
-        if profile_path.exists():
-            return profile_path
+        profile = validate_profile_id(profile)
+        return repo_root() / "data" / f"sources.{profile}.json"
     return repo_root() / "data" / "sources.json"
 
 

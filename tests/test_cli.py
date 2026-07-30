@@ -198,6 +198,8 @@ class CliTests(unittest.TestCase):
             root = Path(tmp_dir)
             data_path = root / "sources.fresh.json"
             history_path = root / "subscription-history.fresh.json"
+            data_path.write_text('{"schema_version": 1, "sources": []}\n', encoding="utf-8")
+            history_path.write_text('{"schema_version": 1, "entries": []}\n', encoding="utf-8")
 
             with (
                 patch("netnewswire_feed_booster.cli.default_sources_path", return_value=data_path) as default_data,
@@ -245,6 +247,37 @@ class CliTests(unittest.TestCase):
         self.assertNotIn("secret-token", redacted_output.getvalue())
         self.assertIn("[redacted; use --show-sensitive]", redacted_output.getvalue())
         self.assertIn("secret-token", sensitive_output.getvalue())
+
+    def test_source_commands_do_not_print_urls_or_local_paths_by_default(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            data_path = Path(tmp_dir) / "sources.json"
+            output = io.StringIO()
+            with redirect_stdout(output):
+                main(
+                    [
+                        "--data",
+                        str(data_path),
+                        "subscribe-substack",
+                        "private-token.example",
+                        "--title",
+                        "Fixture Letter",
+                    ]
+                )
+                main(
+                    [
+                        "--data",
+                        str(data_path),
+                        "subscribe-youtube",
+                        "UCsecret",
+                        "--title",
+                        "Fixture Channel",
+                    ]
+                )
+
+        rendered = output.getvalue()
+        self.assertNotIn("private-token.example", rendered)
+        self.assertNotIn("UCsecret", rendered)
+        self.assertNotIn(tmp_dir, rendered)
 
     def test_set_status_unsubscribed_records_subscription_history(self) -> None:
         with TemporaryDirectory() as tmp_dir:
@@ -598,10 +631,11 @@ class CliTests(unittest.TestCase):
         with TemporaryDirectory() as tmp_dir:
             data_path = Path(tmp_dir) / "sources.json"
             out_dir = Path(tmp_dir) / "bandcamp"
+            output = io.StringIO()
 
             with patch("netnewswire_feed_booster.bandcamp_sources.fetch_text", return_value=artist_html):
                 with patch("netnewswire_feed_booster.cli.render_bandcamp_source_rss", return_value="<rss></rss>"):
-                    with redirect_stdout(io.StringIO()):
+                    with redirect_stdout(output):
                         main(
                             [
                                 "--data",
@@ -618,10 +652,13 @@ class CliTests(unittest.TestCase):
             source = FeedStore(data_path).source_by_id("bandcamp-fixture-artist")
             rss_path = out_dir / "bandcamp-fixture-artist.rss"
             rss_exists = rss_path.exists()
+            rendered_output = output.getvalue()
 
         self.assertIsNotNone(source)
         self.assertEqual(source.groups, ["Music"])
         self.assertTrue(rss_exists)
+        self.assertNotIn(tmp_dir, rendered_output)
+        self.assertNotIn("file://", rendered_output)
 
     def test_set_folder_updates_private_overlay_only_when_requested(self) -> None:
         with TemporaryDirectory() as tmp_dir:
