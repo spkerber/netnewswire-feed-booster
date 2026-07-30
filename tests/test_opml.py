@@ -199,6 +199,34 @@ class OpmlTests(unittest.TestCase):
         self.assertIsNotNone(source)
         self.assertEqual(source.groups, ["New Folder", "Leaf"])
 
+    def test_store_updates_account_source_with_same_canonical_site_url(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            data_path = Path(tmp_dir) / "sources.json"
+            store = FeedStore(data_path)
+            store.add_or_update(
+                Source(
+                    id="old-label-name",
+                    title="Old Label Name",
+                    feed_url="file:///tmp/old-label-name.rss",
+                    site_url="https://label.bandcamp.com/",
+                    kind="bandcamp",
+                )
+            )
+            store.add_or_update(
+                Source(
+                    id="new-label-name",
+                    title="New Label Name",
+                    feed_url="file:///tmp/new-label-name.rss",
+                    site_url="https://LABEL.bandcamp.com",
+                    kind="bandcamp",
+                )
+            )
+
+            sources = store.sources()
+
+        self.assertEqual(len(sources), 1)
+        self.assertEqual(sources[0].title, "New Label Name")
+
     @staticmethod
     def _parse_rendered(rendered: str) -> list[Source]:
         with TemporaryDirectory() as tmp_dir:

@@ -6,12 +6,20 @@ import sys
 from collections import Counter
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlparse
 from .bandcamp import (
     write_bandcamp_collection_rss,
 )
 from .bandcamp_sources import build_bandcamp_source_from_url
 from .subscription_history import SubscriptionHistoryStore, default_subscription_history_path
 from .feed_store import FeedStore, Source, default_private_sources_path, default_sources_path, normalize_url, slugify, source_id_from_title
+from .feed_identity import (
+    FeedIdentity,
+    canonical_url,
+    identity_match_reason,
+    likely_same_title,
+    parse_feed_identity,
+)
 from .feed_validation import audit_sources, discover_feed_url
 from .generated_migration import apply_generated_source_migration, plan_generated_source_migration
 from .generated_adapters import BANDCAMP_ADAPTER, NTS_ADAPTER, WEBPAGE_ADAPTER, adapter_for_source
@@ -98,6 +106,32 @@ def build_parser() -> argparse.ArgumentParser:
 
     add_parser = subparsers.add_parser("add", help="Add a source")
     add_source_arguments(add_parser)
+
+    subscribe_feed_parser = subparsers.add_parser(
+        "subscribe-feed-url",
+        help="Discover and add one public feed after checking canonical metadata and recent item IDs for duplicates",
+    )
+    subscribe_feed_parser.add_argument("url")
+    subscribe_feed_parser.add_argument("--title", default="")
+    subscribe_feed_parser.add_argument("--profile", default=DEFAULT_PROFILE)
+    subscribe_feed_parser.add_argument("--group", action="append", default=[])
+    subscribe_feed_parser.add_argument(
+        "--kind",
+        default="auto",
+        choices=["auto", "website", "substack", "youtube", "newsletter", "podcast", "other"],
+    )
+    subscribe_feed_parser.add_argument(
+        "--allow-possible-duplicate",
+        action="store_true",
+        help="Add even when another same-kind source has the same normalized title but no strong identity match",
+    )
+    configured_netnewswire_opml = os.environ.get("NETNEWSWIRE_OPML", "").strip()
+    subscribe_feed_parser.add_argument(
+        "--against-opml",
+        type=Path,
+        default=Path(configured_netnewswire_opml) if configured_netnewswire_opml else None,
+        help="Also check an existing NetNewsWire OPML export. Defaults to NETNEWSWIRE_OPML when configured.",
+    )
 
     subscribe_substack_parser = subparsers.add_parser("subscribe-substack", help="One-off add or reactivate a Substack feed")
     subscribe_substack_parser.add_argument("domain_or_url")
@@ -294,6 +328,47 @@ def add_source_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--notes", default="")
 
 
+def _find_feed_identity_duplicate(
+    existing_sources: list[Source],
+    incoming: Source,
+    incoming_identity: FeedIdentity,
+) -> tuple[Optional[Source], str, bool]:
+    possible: Optional[Source] = None
+    incoming_feed_url = canonical_url(incoming.feed_url)
+    incoming_site_url = canonical_url(incoming.site_url)
+    for existing in existing_sources:
+        if existing.kind != incoming.kind:
+            continue
+        if incoming_feed_url and canonical_url(existing.feed_url) == incoming_feed_url:
+            return existing, "same normalized feed URL", False
+        if incoming_site_url and canonical_url(existing.site_url) == incoming_site_url:
+            return existing, "same canonical publication URL", False
+        if not likely_same_title(
+            incoming_identity,
+            FeedIdentity(existing.title, "", "", frozenset()),
+        ):
+            continue
+        possible = possible or existing
+        try:
+            existing_identity = parse_feed_identity(
+                _read_identity_source(existing.feed_url),
+                fallback_url=existing.feed_url,
+            )
+        except Exception:
+            continue
+        reason = identity_match_reason(incoming_identity, existing_identity)
+        if reason:
+            return existing, reason, False
+    return possible, "", possible is not None
+
+
+def _read_identity_source(url: str) -> str:
+    parsed = urlparse(url)
+    if parsed.scheme == "file":
+        return Path(parsed.path).read_text(encoding="utf-8", errors="replace")
+    return fetch_text(url)
+
+
 def normalize_legacy_webpage_command(argv: Optional[list[str]]) -> list[str]:
     """Keep the v0.1 HydeFM shortcut working without presenting it as a feature."""
 
@@ -441,6 +516,59 @@ def main(argv: Optional[list[str]] = None) -> int:
         source_id = store.add_or_update(source)
         store.save()
         print(f"Saved source {source_id}")
+        return 0
+
+    if args.command == "subscribe-feed-url":
+        feed_url = discover_feed_url(args.url)
+        incoming_text = fetch_text(feed_url)
+        incoming_identity = parse_feed_identity(incoming_text, fallback_url=feed_url)
+        title = args.title.strip() or incoming_identity.title or args.url
+        kind = args.kind if args.kind != "auto" else incoming_identity.provider or "website"
+        incoming = Source(
+            id=source_id_from_title(title, feed_url),
+            title=title,
+            feed_url=feed_url,
+            site_url=incoming_identity.home_url or normalize_url(args.url),
+            kind=kind,
+            profiles=[args.profile],
+            groups=args.group,
+            status="active",
+            source="public-feed-discovery",
+        )
+        stored_sources = store.sources()
+        identity_sources = stored_sources + private_store.sources()
+        if args.against_opml is not None:
+            if not args.against_opml.is_file():
+                parser.error(f"Missing NetNewsWire OPML: {args.against_opml}")
+            identity_sources.extend(parse_opml(args.against_opml, profile=args.profile))
+        duplicate, reason, possible = _find_feed_identity_duplicate(identity_sources, incoming, incoming_identity)
+        if duplicate and reason:
+            stored_duplicate = next(
+                (
+                    source
+                    for source in stored_sources
+                    if source.id == duplicate.id and source.feed_url == duplicate.feed_url
+                ),
+                None,
+            )
+            if stored_duplicate is not None and stored_duplicate.status != "active":
+                store.set_status(stored_duplicate.id, "active")
+                store.save()
+                print(f"Reactivated {stored_duplicate.id}: {reason}")
+            else:
+                print(f"Already subscribed as {duplicate.id}: {reason}")
+            return 0
+        if duplicate and possible and not args.allow_possible_duplicate:
+            print(
+                f"Possible duplicate of {duplicate.id}: same normalized title. "
+                "Re-run with --allow-possible-duplicate only after confirming they are separate.",
+                file=sys.stderr,
+            )
+            return 1
+        source_id = store.add_or_update(incoming)
+        store.set_status(source_id, "active")
+        store.save()
+        print(f"Subscribed public feed {source_id}.")
         return 0
 
     if args.command == "subscribe-substack":

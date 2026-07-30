@@ -165,14 +165,15 @@ PYTHONPATH=src python3 -m netnewswire_feed_booster \
 
 ### Any Public Website
 
-Try feed discovery before considering an adapter:
+Use the one-step subscription command before considering an adapter:
 
 ```bash
 PYTHONPATH=src python3 -m netnewswire_feed_booster \
-  discover-feed https://example.com
+  --data "data/sources.${RSS_PROFILE}.json" \
+  subscribe-feed-url https://example.com --profile "$RSS_PROFILE"
 ```
 
-If the page exposes an RSS, Atom, or JSON Feed alternate link, add that direct feed. If not, keep the public source URL in a private text file and consult [Writing A Source Adapter](writing-a-source-adapter.md) before proposing generated RSS.
+The command discovers RSS, Atom, or JSON Feed metadata before writing. It blocks strong duplicates by normalized feed URL, canonical publication URL, or overlapping stable item IDs. It also blocks same-kind, same-title probable duplicates unless you explicitly pass `--allow-possible-duplicate`. Set `NETNEWSWIRE_OPML` in the ignored private environment file, or pass `--against-opml`, to include an existing NetNewsWire subscription export in the preflight. If the page exposes no feed, keep the public source URL in a private text file and consult [Writing A Source Adapter](writing-a-source-adapter.md) before proposing generated RSS.
 
 ## Generated Public Sources
 

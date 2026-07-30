@@ -156,6 +156,225 @@ class CliTests(unittest.TestCase):
         self.assertIsNotNone(source)
         self.assertEqual(source.title, "New")
 
+    def test_subscribe_feed_url_skips_custom_domain_alias_with_overlapping_item_ids(self) -> None:
+        old_feed = """
+        <rss><channel>
+          <title>Fixture Dispatch</title>
+          <link>https://fixture-dispatch.substack.com/</link>
+          <generator>Substack</generator>
+          <item><guid>post-123</guid></item>
+        </channel></rss>
+        """
+        new_feed = """
+        <rss><channel>
+          <title>Fixture Dispatch</title>
+          <link>https://dispatch.example/</link>
+          <generator>Substack</generator>
+          <item><guid>post-123</guid></item>
+        </channel></rss>
+        """
+        with TemporaryDirectory() as tmp_dir:
+            data_path = Path(tmp_dir) / "sources.json"
+            store = FeedStore(data_path)
+            store.add_or_update(
+                Source(
+                    id="fixture-dispatch",
+                    title="Fixture Dispatch",
+                    feed_url="https://fixture-dispatch.substack.com/feed",
+                    site_url="https://fixture-dispatch.substack.com/",
+                    kind="substack",
+                    profiles=["test-user"],
+                )
+            )
+            store.save()
+
+            def fetch(url):
+                return new_feed if url == "https://dispatch.example/feed" else old_feed
+
+            with (
+                patch("netnewswire_feed_booster.cli.discover_feed_url", return_value="https://dispatch.example/feed"),
+                patch("netnewswire_feed_booster.cli.fetch_text", side_effect=fetch),
+                redirect_stdout(io.StringIO()) as stdout,
+            ):
+                result = main(
+                    [
+                        "--data",
+                        str(data_path),
+                        "subscribe-feed-url",
+                        "https://dispatch.example/",
+                        "--profile",
+                        "test-user",
+                    ]
+                )
+
+            sources = FeedStore(data_path).sources()
+
+        self.assertEqual(result, 0)
+        self.assertEqual(len(sources), 1)
+        self.assertIn("overlapping stable item IDs", stdout.getvalue())
+
+    def test_subscribe_feed_url_keeps_same_title_on_different_provider(self) -> None:
+        incoming_feed = """
+        <rss><channel>
+          <title>Shared Name</title>
+          <link>https://dispatch.example/</link>
+          <generator>Substack</generator>
+          <item><guid>post-123</guid></item>
+        </channel></rss>
+        """
+        with TemporaryDirectory() as tmp_dir:
+            data_path = Path(tmp_dir) / "sources.json"
+            store = FeedStore(data_path)
+            store.add_or_update(
+                Source(
+                    id="shared-name-podcast",
+                    title="Shared Name",
+                    feed_url="https://audio.example/feed",
+                    site_url="https://audio.example/",
+                    kind="podcast",
+                    profiles=["test-user"],
+                )
+            )
+            store.save()
+
+            with (
+                patch("netnewswire_feed_booster.cli.discover_feed_url", return_value="https://dispatch.example/feed"),
+                patch("netnewswire_feed_booster.cli.fetch_text", return_value=incoming_feed),
+                redirect_stdout(io.StringIO()),
+            ):
+                result = main(
+                    [
+                        "--data",
+                        str(data_path),
+                        "subscribe-feed-url",
+                        "https://dispatch.example/",
+                        "--profile",
+                        "test-user",
+                    ]
+                )
+
+            sources = FeedStore(data_path).sources()
+
+        self.assertEqual(result, 0)
+        self.assertEqual(len(sources), 2)
+
+    def test_subscribe_feed_url_checks_existing_netnewswire_opml(self) -> None:
+        old_feed = """
+        <rss><channel>
+          <title>Fixture Dispatch</title>
+          <link>https://fixture-dispatch.substack.com/</link>
+          <generator>Substack</generator>
+          <item><guid>post-123</guid></item>
+        </channel></rss>
+        """
+        new_feed = """
+        <rss><channel>
+          <title>Fixture Dispatch</title>
+          <link>https://dispatch.example/</link>
+          <generator>Substack</generator>
+          <item><guid>post-123</guid></item>
+        </channel></rss>
+        """
+        with TemporaryDirectory() as tmp_dir:
+            data_path = Path(tmp_dir) / "sources.json"
+            opml_path = Path(tmp_dir) / "subscriptions.opml"
+            write_opml(
+                opml_path,
+                [
+                    Source(
+                        id="fixture-dispatch",
+                        title="Fixture Dispatch",
+                        feed_url="https://fixture-dispatch.substack.com/feed",
+                        site_url="https://fixture-dispatch.substack.com/",
+                        kind="substack",
+                        profiles=["test-user"],
+                    )
+                ],
+                title="Fixture subscriptions",
+            )
+
+            def fetch(url):
+                return new_feed if url == "https://dispatch.example/feed" else old_feed
+
+            with (
+                patch("netnewswire_feed_booster.cli.discover_feed_url", return_value="https://dispatch.example/feed"),
+                patch("netnewswire_feed_booster.cli.fetch_text", side_effect=fetch),
+                redirect_stdout(io.StringIO()) as stdout,
+            ):
+                result = main(
+                    [
+                        "--data",
+                        str(data_path),
+                        "subscribe-feed-url",
+                        "https://dispatch.example/",
+                        "--profile",
+                        "test-user",
+                        "--against-opml",
+                        str(opml_path),
+                    ]
+                )
+
+            sources = FeedStore(data_path).sources()
+
+        self.assertEqual(result, 0)
+        self.assertEqual(sources, [])
+        self.assertIn("overlapping stable item IDs", stdout.getvalue())
+
+    def test_subscribe_feed_url_blocks_unconfirmed_same_kind_same_title(self) -> None:
+        old_feed = """
+        <rss><channel>
+          <title>Shared Dispatch</title>
+          <link>https://first.example/</link>
+          <item><guid>first-post</guid></item>
+        </channel></rss>
+        """
+        new_feed = """
+        <rss><channel>
+          <title>Shared Dispatch</title>
+          <link>https://second.example/</link>
+          <item><guid>second-post</guid></item>
+        </channel></rss>
+        """
+        with TemporaryDirectory() as tmp_dir:
+            data_path = Path(tmp_dir) / "sources.json"
+            store = FeedStore(data_path)
+            store.add_or_update(
+                Source(
+                    id="shared-dispatch",
+                    title="Shared Dispatch",
+                    feed_url="https://first.example/feed",
+                    site_url="https://first.example/",
+                    kind="website",
+                    profiles=["test-user"],
+                )
+            )
+            store.save()
+
+            def fetch(url):
+                return new_feed if url == "https://second.example/feed" else old_feed
+
+            with (
+                patch("netnewswire_feed_booster.cli.discover_feed_url", return_value="https://second.example/feed"),
+                patch("netnewswire_feed_booster.cli.fetch_text", side_effect=fetch),
+                redirect_stderr(io.StringIO()) as stderr,
+            ):
+                result = main(
+                    [
+                        "--data",
+                        str(data_path),
+                        "subscribe-feed-url",
+                        "https://second.example/",
+                        "--profile",
+                        "test-user",
+                    ]
+                )
+
+            sources = FeedStore(data_path).sources()
+
+        self.assertEqual(result, 1)
+        self.assertEqual(len(sources), 1)
+        self.assertIn("--allow-possible-duplicate", stderr.getvalue())
+
     def test_set_folder_sets_a_nested_path_and_can_clear_it(self) -> None:
         with TemporaryDirectory() as tmp_dir:
             data_path = Path(tmp_dir) / "sources.json"

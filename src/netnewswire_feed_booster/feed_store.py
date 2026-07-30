@@ -12,6 +12,7 @@ from typing import Any, Dict, Iterable, List, Optional
 
 VALID_STATUSES = {"active", "candidate", "paused", "unsubscribed"}
 VALID_KINDS = {"website", "substack", "youtube", "bandcamp", "newsletter", "podcast", "other"}
+ACCOUNT_IDENTITY_KINDS = {"bandcamp", "substack", "youtube"}
 PROFILE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 
 
@@ -169,10 +170,27 @@ class FeedStore:
         self.data["sources"] = [item.to_dict() for item in sorted(sources, key=lambda item: item.title.lower())]
 
     def add_or_update(self, source: Source) -> str:
+        from .feed_identity import canonical_url
+
         source.groups = normalize_groups_for_source(source)
         self._validate(source)
         sources = self.sources()
-        existing = next((item for item in sources if item.id == source.id or item.feed_url == source.feed_url), None)
+        canonical_site = canonical_url(source.site_url)
+        existing = next(
+            (
+                item
+                for item in sources
+                if item.id == source.id
+                or item.feed_url == source.feed_url
+                or (
+                    source.kind in ACCOUNT_IDENTITY_KINDS
+                    and item.kind == source.kind
+                    and canonical_site
+                    and canonical_url(item.site_url) == canonical_site
+                )
+            ),
+            None,
+        )
         if existing:
             if existing.id == "source" and source.id != "source":
                 existing.id = source.id
@@ -197,15 +215,27 @@ class FeedStore:
 
     def add_or_update_many(self, incoming_sources: Iterable[Source]) -> int:
         """Merge a collection of sources and sort once, for large OPML imports."""
+        from .feed_identity import canonical_url
+
         sources = self.sources()
         by_id = {source.id: source for source in sources}
         by_feed_url = {source.feed_url: source for source in sources}
+        by_account_site = {
+            (source.kind, canonical_url(source.site_url)): source
+            for source in sources
+            if source.kind in ACCOUNT_IDENTITY_KINDS and canonical_url(source.site_url)
+        }
         added_or_updated = 0
 
         for source in incoming_sources:
             source.groups = normalize_groups_for_source(source)
             self._validate(source)
-            existing = by_id.get(source.id) or by_feed_url.get(source.feed_url)
+            account_key = (source.kind, canonical_url(source.site_url))
+            existing = (
+                by_id.get(source.id)
+                or by_feed_url.get(source.feed_url)
+                or (by_account_site.get(account_key) if source.kind in ACCOUNT_IDENTITY_KINDS else None)
+            )
             if existing:
                 existing.title = source.title or existing.title
                 existing.feed_url = source.feed_url or existing.feed_url
@@ -217,11 +247,17 @@ class FeedStore:
                 existing.notes = source.notes or existing.notes
                 existing.source = existing.source if existing.source != "manual" else source.source
                 by_feed_url[existing.feed_url] = existing
+                if existing.kind in ACCOUNT_IDENTITY_KINDS:
+                    updated_account_key = (existing.kind, canonical_url(existing.site_url))
+                    if updated_account_key[1]:
+                        by_account_site[updated_account_key] = existing
             else:
                 source.id = unique_id(source.id, by_id)
                 sources.append(source)
                 by_id[source.id] = source
                 by_feed_url[source.feed_url] = source
+                if source.kind in ACCOUNT_IDENTITY_KINDS and account_key[1]:
+                    by_account_site[account_key] = source
             added_or_updated += 1
 
         self.set_sources(sources)
