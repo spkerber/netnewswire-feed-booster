@@ -4,7 +4,8 @@ This guide has three paths. Start with the one that matches how you want to work
 
 | Path | Best for | Requires |
 | --- | --- | --- |
-| GUI-first | Reading and adding native feeds without a terminal | NetNewsWire and Finder |
+| Starter bundle | Running the real product with eight public examples | Finder and Python 3.9+ |
+| GUI-first | Reading and adding one native feed without this product | NetNewsWire |
 | Terminal | Keeping a versioned, local registry yourself | Git and Python 3.9+ |
 | Agent-assisted | A semi-technical setup with reviewable automation | A local clone and a coding harness |
 
@@ -29,7 +30,7 @@ flowchart TD
 
 ## GUI-First Workflow (No Terminal)
 
-Use this path when you only need native feeds and want NetNewsWire to be the entire workflow. It does not add generated Bandcamp, NTS, HydeFM, or Mixcloud feeds; those need the terminal or a local coding agent.
+Use this path when you only need native feeds and want NetNewsWire to be the entire workflow. It is a NetNewsWire workflow, not a trial of Feed Booster. To exercise this product without typing commands, download the repository and double-click `Start Example Feed.command` as described in [First Feed](first-feed.md).
 
 For the shortest path from download to a verified working feed, follow [First Feed](first-feed.md) before adding your own sources.
 
@@ -74,7 +75,7 @@ install -m 600 examples/private.env.example data/private.env
 ### 1. Create a Private Working Copy
 
 ```bash
-git clone <repository-url> my-rss-stack
+git clone https://github.com/spkerber/netnewswire-feed-booster.git my-rss-stack
 cd my-rss-stack
 export PYTHONPATH=src
 ./scripts/bootstrap_profile.sh me

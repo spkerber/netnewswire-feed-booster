@@ -3,27 +3,22 @@ PYTHON := python3
 PROFILE ?= me
 PROFILE_DATA := data/sources.$(PROFILE).json
 PROFILE_HISTORY := data/subscription-history.$(PROFILE).json
-ifneq ($(wildcard $(PROFILE_DATA)),)
 DATA ?= $(PROFILE_DATA)
-else
-DATA ?= data/sources.json
-endif
-ifneq ($(wildcard $(PROFILE_HISTORY)),)
 HISTORY ?= $(PROFILE_HISTORY)
-else
-HISTORY ?= data/subscription-history.json
-endif
 IMPORT_OPML ?= imports/netnewswire.opml
 EXPORT_OPML ?= exports/$(PROFILE)-netnewswire.opml
 CLI := PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m netnewswire_feed_booster --data $(DATA) --history $(HISTORY)
 
-.PHONY: help test list import export hosted-export modal-deploy publish-netnewswire unfollows history
+.PHONY: help test example-feed list import export hosted-export modal-deploy publish-netnewswire unfollows history
 
 help:
 	$(CLI) --help
 
 test:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m unittest discover -s tests
+
+example-feed:
+	./scripts/create_example_feed.sh $(PROFILE)
 
 list:
 	$(CLI) list --profile $(PROFILE)

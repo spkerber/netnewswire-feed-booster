@@ -21,7 +21,7 @@ I am sharing it as an MIT-licensed reference implementation and would value comm
 1. Which public source types would be most useful to make feed-friendly?
 2. What would make OPML import and locally generated feeds safer or smoother in NetNewsWire?
 
-Project link: `<add public GitHub URL>`
+Project link: [github.com/spkerber/netnewswire-feed-booster](https://github.com/spkerber/netnewswire-feed-booster)
 
 I am not asking NetNewsWire to adopt this code. I want to contribute a small, interoperable tool and learn from people who care about a calmer, more open web.
 

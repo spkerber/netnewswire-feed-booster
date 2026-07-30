@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
 PROFILE="${1:-me}"
 MODE="${2:-}"
 
 if [[ "${PROFILE}" == "" ]]; then
   echo "Usage: $0 PROFILE_ID [--force]" >&2
+  exit 2
+fi
+
+if [[ ! "${PROFILE}" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$ ]]; then
+  echo "Profile IDs must start with a letter or number and contain only letters, numbers, hyphens, or underscores (64 characters maximum)." >&2
   exit 2
 fi
 
@@ -16,27 +22,30 @@ fi
 
 mkdir -p data
 
-write_file() {
-  local path="$1"
-  local content="$2"
-  if [[ -e "${path}" && "${MODE}" != "--force" ]]; then
-    echo "Refusing to overwrite ${path}. Re-run with --force if this is a fresh clone or private duplicate." >&2
-    exit 1
-  fi
-  printf "%s\n" "${content}" > "${path}"
-}
+sources_path="data/sources.${PROFILE}.json"
+history_path="data/subscription-history.${PROFILE}.json"
+profiles_path="data/profiles.${PROFILE}.json"
 
-write_file "data/sources.${PROFILE}.json" '{
+if [[ "${MODE}" != "--force" ]]; then
+  for path in "${sources_path}" "${history_path}" "${profiles_path}"; do
+    if [[ -e "${path}" ]]; then
+      echo "Refusing to overwrite ${path}. Re-run with --force only when intentionally replacing this private profile." >&2
+      exit 1
+    fi
+  done
+fi
+
+printf '%s\n' '{
   "schema_version": 1,
   "sources": []
-}'
+}' > "${sources_path}"
 
-write_file "data/subscription-history.${PROFILE}.json" '{
+printf '%s\n' '{
   "schema_version": 1,
   "entries": []
-}'
+}' > "${history_path}"
 
-write_file "data/profiles.${PROFILE}.json" "{
+printf '%s\n' "{
   \"schema_version\": 1,
   \"profiles\": [
     {
@@ -52,7 +61,7 @@ write_file "data/profiles.${PROFILE}.json" "{
       ]
     }
   ]
-}"
+}" > "${profiles_path}"
 
 echo "Initialized data files for RSS_PROFILE=${PROFILE}."
 echo "Run: export RSS_PROFILE=${PROFILE}"
