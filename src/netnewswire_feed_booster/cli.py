@@ -54,6 +54,62 @@ from .youtube import parse_youtube_channel_html, parse_youtube_subscriptions_fil
 
 DEFAULT_PROFILE = os.environ.get("RSS_PROFILE", "me")
 
+# Which adapter a subscribe or import command speaks to. The key drives both the
+# built-in folder default and the RSS_DEFAULT_GROUP_<KEY> environment override.
+ADAPTER_KEY_BY_COMMAND = {
+    "import-soundcloud-following": "SOUNDCLOUD",
+    "import-substack-library": "SUBSTACK",
+    "import-substack-profile": "SUBSTACK",
+    "import-youtube-channel-url": "YOUTUBE",
+    "import-youtube-subscriptions": "YOUTUBE",
+    "subscribe-bandcamp-source": "BANDCAMP",
+    "subscribe-mixcloud-profile": "MIXCLOUD",
+    "subscribe-nts-show": "NTS",
+    "subscribe-podcast": "PODCAST",
+    "subscribe-substack": "SUBSTACK",
+    "subscribe-webpage-feed": "WEBPAGE",
+    "subscribe-youtube": "YOUTUBE",
+}
+
+# Same keys for the generic commands, where the adapter is whatever --kind says.
+# "auto", "website", "newsletter", and "other" are deliberately absent: they name
+# no single upstream, so those sources stay at the OPML root.
+ADAPTER_KEY_BY_KIND = {
+    "bandcamp": "BANDCAMP",
+    "podcast": "PODCAST",
+    "substack": "SUBSTACK",
+    "youtube": "YOUTUBE",
+}
+
+# Platforms: many publishers share one host, and the platform name is a fact
+# about where the feed comes from rather than a claim about what it contains.
+# Defaulting to it is safe for any reader's list, so these need no configuration.
+PLATFORM_GROUPS = {
+    "BANDCAMP": "Bandcamp",
+    "MIXCLOUD": "Mixcloud",
+    "PODCAST": "Podcasts",
+    "SOUNDCLOUD": "SoundCloud",
+    "SUBSTACK": "Substack",
+    "YOUTUBE": "YouTube",
+}
+
+# Independent sites: NTS and the webpage recipes are single stations and
+# publications, not platforms other people also publish on. A folder named "NTS"
+# would hold exactly one site, and only the reader knows the category it belongs
+# to — Online Radio for one person, Archives or Music for another. So there is no
+# built-in default. Set RSS_DEFAULT_GROUP_NTS or RSS_DEFAULT_GROUP_WEBPAGE once
+# and every later subscribe inherits it; until then these land at the OPML root
+# with a note saying so.
+INDEPENDENT_SITE_KEYS = frozenset({"NTS", "WEBPAGE"})
+
+# TODO: decide whether grouping should become per-feed rather than per-adapter.
+# The split above is still adapter-shaped: every Bandcamp feed shares one folder,
+# which suits a list dominated by one source type and suits nobody who would
+# rather sort by genre, label, or reading priority. Doing that well needs a
+# per-source rule or a mapping file, plus a decision about what re-import does to
+# hand-placed feeds. Worth settling before these defaults harden into an
+# assumption. RSS_DEFAULT_GROUP_<KEY> is a stopgap, not that answer.
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -406,11 +462,57 @@ def _option_was_supplied(argv: list[str], option: str) -> bool:
     return any(argument == option or argument.startswith(f"{option}=") for argument in argv)
 
 
+def _apply_default_group(args: argparse.Namespace, argv: list[str]) -> None:
+    """Choose a folder for a new source when the caller named none.
+
+    Resolution order: an explicit --group, then RSS_DEFAULT_GROUP_<KEY>, then a
+    built-in platform folder. Independent sites have no built-in folder, so they
+    stay at the OPML root. Silently landing at the root is what scattered feeds
+    across the top level, so every outcome here is announced. An explicit --group
+    always wins, including --group "" for the root.
+    """
+
+    if not hasattr(args, "group") or _option_was_supplied(argv, "--group"):
+        return
+
+    key = ADAPTER_KEY_BY_COMMAND.get(args.command) or ADAPTER_KEY_BY_KIND.get(getattr(args, "kind", ""))
+    if key is None:
+        return
+
+    variable = f"RSS_DEFAULT_GROUP_{key}"
+    group = os.environ.get(variable, "").strip()
+    if group:
+        origin = f"set by {variable}"
+    elif key in PLATFORM_GROUPS:
+        group = PLATFORM_GROUPS[key]
+        origin = f"the default folder for {group} sources"
+    else:
+        print(
+            f"No --group given and {variable} is not set, so this source stays at the OPML root. "
+            f'This source is an independent site rather than a platform, so only you can say which '
+            f'folder it belongs in: pass --group "Your Folder", or set {variable} to file every '
+            f"later one automatically.",
+            file=sys.stderr,
+        )
+        return
+
+    if isinstance(args.group, list):
+        args.group = [group]
+    else:
+        args.group = group
+    print(
+        f'No --group given; filing this source under "{group}" ({origin}). '
+        'Pass --group "Your Folder" to choose another, or --group "" for the OPML root.',
+        file=sys.stderr,
+    )
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     parser = build_parser()
     normalized_argv = normalize_legacy_webpage_command(argv)
     profile_was_explicit = _option_was_supplied(normalized_argv, "--profile")
     args = parser.parse_args(normalized_argv)
+    _apply_default_group(args, normalized_argv)
     profile = getattr(args, "profile", None) or os.environ.get("RSS_PROFILE", "")
     data_was_explicit = args.data is not None
     if args.data is None:

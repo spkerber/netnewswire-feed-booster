@@ -1,6 +1,7 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import io
+import os
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import patch
@@ -18,6 +19,15 @@ EMPTY_NETNEWSWIRE_OPML = """<?xml version="1.0" encoding="UTF-8"?>
   <body></body>
 </opml>
 """
+NTS_SHOW_HTML = (
+    "<script>window._REACT_STATE_ = "
+    '{"show":{"name":"Fixture Signal","description":"Monthly show",'
+    '"show_alias":"fixture-signal","episodes":[{"name":"Fixture Signal",'
+    '"description":"Latest episode","episode_alias":"fixture-signal-1st-july-2026",'
+    '"show_alias":"fixture-signal","broadcast":"2026-07-01T21:00:00+00:00",'
+    '"audio_sources":[{"url":"https://soundcloud.com/example/fixture-signal",'
+    '"source":"soundcloud"}]}]}};</script>'
+)
 WEBPAGE_RECIPE_HTML = """
 <div data-elementor-type="loop-item">
   <h2>July 2, 2026</h2>
@@ -111,19 +121,19 @@ class CliTests(unittest.TestCase):
         self.assertTrue(source.id.startswith("source-"))
         self.assertNotIn("private-token", source.id)
 
-    def test_source_specific_commands_only_use_an_explicit_folder(self) -> None:
+    def test_source_specific_commands_default_to_the_adapter_folder(self) -> None:
         with TemporaryDirectory() as tmp_dir:
             data_path = Path(tmp_dir) / "sources.json"
 
-            with redirect_stdout(io.StringIO()):
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
                 main(
                     [
                         "--data",
                         str(data_path),
                         "subscribe-youtube",
-                        "UCroot",
+                        "UCdefault",
                         "--title",
-                        "Root Feed",
+                        "Default Feed",
                     ]
                 )
                 main(
@@ -138,11 +148,138 @@ class CliTests(unittest.TestCase):
                         "My Video Folder",
                     ]
                 )
+                main(
+                    [
+                        "--data",
+                        str(data_path),
+                        "subscribe-youtube",
+                        "UCroot",
+                        "--title",
+                        "Root Feed",
+                        "--group",
+                        "",
+                    ]
+                )
 
             sources = {source.id: source for source in FeedStore(data_path).sources()}
 
-        self.assertEqual(sources["root-feed"].groups, [])
+        self.assertEqual(sources["default-feed"].groups, ["YouTube"])
         self.assertEqual(sources["folder-feed"].groups, ["My Video Folder"])
+        self.assertEqual(sources["root-feed"].groups, [])
+
+    def test_default_adapter_folder_is_announced_on_stderr(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            data_path = Path(tmp_dir) / "sources.json"
+            stderr = io.StringIO()
+
+            with redirect_stdout(io.StringIO()), redirect_stderr(stderr):
+                main(
+                    [
+                        "--data",
+                        str(data_path),
+                        "subscribe-youtube",
+                        "UCnotice",
+                        "--title",
+                        "Notice Feed",
+                    ]
+                )
+
+        message = stderr.getvalue()
+        self.assertIn("--group", message)
+        self.assertIn("YouTube", message)
+
+    def _subscribe_nts_fixture_show(self, tmp_dir: str, data_path: Path, stderr: io.StringIO) -> None:
+        with patch("netnewswire_feed_booster.cli.fetch_text", return_value=NTS_SHOW_HTML), redirect_stdout(
+            io.StringIO()
+        ), redirect_stderr(stderr):
+            main(
+                [
+                    "--data",
+                    str(data_path),
+                    "subscribe-nts-show",
+                    "https://www.nts.live/shows/fixture-signal",
+                    "--out-dir",
+                    str(Path(tmp_dir) / "generated"),
+                ]
+            )
+
+    def test_independent_site_stays_at_the_root_and_names_its_env_override(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            data_path = Path(tmp_dir) / "sources.json"
+            stderr = io.StringIO()
+
+            with patch.dict(os.environ):
+                os.environ.pop("RSS_DEFAULT_GROUP_NTS", None)
+                self._subscribe_nts_fixture_show(tmp_dir, data_path, stderr)
+
+            sources = FeedStore(data_path).sources()
+            message = stderr.getvalue()
+
+        self.assertEqual([source.groups for source in sources], [[]])
+        self.assertIn("RSS_DEFAULT_GROUP_NTS", message)
+
+    def test_independent_site_uses_a_configured_group(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            data_path = Path(tmp_dir) / "sources.json"
+
+            with patch.dict(os.environ, {"RSS_DEFAULT_GROUP_NTS": "Online Radio"}):
+                self._subscribe_nts_fixture_show(tmp_dir, data_path, io.StringIO())
+
+            sources = FeedStore(data_path).sources()
+
+        self.assertEqual([source.groups for source in sources], [["Online Radio"]])
+
+    def test_configured_group_overrides_the_platform_default(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            data_path = Path(tmp_dir) / "sources.json"
+
+            with patch.dict(os.environ, {"RSS_DEFAULT_GROUP_YOUTUBE": "Video"}), redirect_stdout(
+                io.StringIO()
+            ), redirect_stderr(io.StringIO()):
+                main(
+                    [
+                        "--data",
+                        str(data_path),
+                        "subscribe-youtube",
+                        "UCconfigured",
+                        "--title",
+                        "Configured Feed",
+                    ]
+                )
+
+            source = FeedStore(data_path).source_by_id("configured-feed")
+
+        self.assertEqual(source.groups, ["Video"])
+
+    def test_subscribe_feed_url_defaults_the_folder_from_an_explicit_kind(self) -> None:
+        feed = """
+        <rss><channel>
+          <title>Kind Dispatch</title>
+          <link>https://kind-dispatch.substack.com/</link>
+          <item><guid>https://kind-dispatch.substack.com/p/one</guid></item>
+        </channel></rss>
+        """
+
+        with TemporaryDirectory() as tmp_dir:
+            data_path = Path(tmp_dir) / "sources.json"
+
+            with patch("netnewswire_feed_booster.cli.discover_feed_url", return_value="https://kind-dispatch.substack.com/feed"), patch(
+                "netnewswire_feed_booster.cli.fetch_text", return_value=feed
+            ), redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                main(
+                    [
+                        "--data",
+                        str(data_path),
+                        "subscribe-feed-url",
+                        "https://kind-dispatch.substack.com/",
+                        "--kind",
+                        "substack",
+                    ]
+                )
+
+            sources = FeedStore(data_path).sources()
+
+        self.assertEqual([source.groups for source in sources], [["Substack"]])
 
     def test_readding_legacy_source_id_migrates_to_a_stable_id(self) -> None:
         with TemporaryDirectory() as tmp_dir:
@@ -884,6 +1021,34 @@ class CliTests(unittest.TestCase):
         self.assertTrue(rss_exists)
         self.assertNotIn(tmp_dir, rendered_output)
         self.assertNotIn("file://", rendered_output)
+
+    def test_subscribe_bandcamp_source_defaults_to_the_bandcamp_folder(self) -> None:
+        artist_html = '''
+        <meta property="og:site_name" content="Fixture Artist">
+        <ol id="music-grid" data-client-items="[{&quot;art_id&quot;:1463768112,&quot;artist&quot;:&quot;Fixture Artist&quot;,&quot;page_url&quot;:&quot;/album/fixture-record&quot;,&quot;title&quot;:&quot;Fixture Record&quot;,&quot;type&quot;:&quot;album&quot;}]"></ol>
+        '''
+        with TemporaryDirectory() as tmp_dir:
+            data_path = Path(tmp_dir) / "sources.json"
+            out_dir = Path(tmp_dir) / "bandcamp"
+
+            with patch("netnewswire_feed_booster.bandcamp_sources.fetch_text", return_value=artist_html):
+                with patch("netnewswire_feed_booster.cli.render_bandcamp_source_rss", return_value="<rss></rss>"):
+                    with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                        main(
+                            [
+                                "--data",
+                                str(data_path),
+                                "subscribe-bandcamp-source",
+                                "https://fixture-artist.bandcamp.com/",
+                                "--out-dir",
+                                str(out_dir),
+                            ]
+                        )
+
+            source = FeedStore(data_path).source_by_id("bandcamp-fixture-artist")
+
+        self.assertIsNotNone(source)
+        self.assertEqual(source.groups, ["Bandcamp"])
 
     def test_set_folder_updates_private_overlay_only_when_requested(self) -> None:
         with TemporaryDirectory() as tmp_dir:

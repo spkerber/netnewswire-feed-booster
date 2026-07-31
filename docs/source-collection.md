@@ -56,7 +56,31 @@ PYTHONPATH=src python3 -m netnewswire_feed_booster \
 
 Imported OPML folders are preserved as an ordered folder path. This project does not prescribe a taxonomy: use no folders, one folder, or as many nested folders as make your reader useful to you.
 
-Source-specific commands start at the OPML root unless you deliberately provide `--group "Your Folder"`. Use `set-folder --private` when the source itself lives in the ignored private overlay.
+A new source picks its folder in this order: an explicit `--group`, then `RSS_DEFAULT_GROUP_<ADAPTER>` from your environment, then a built-in default. Whichever applies, the command prints the folder it chose and why.
+
+**Platforms get a built-in default.** Bandcamp, YouTube, Substack, SoundCloud, Mixcloud, and podcasts are hosts that many publishers share, so the platform name is a fact about where a feed came from rather than a claim about what it contains. `subscribe-bandcamp-source` files under `Bandcamp`, `subscribe-youtube` under `YouTube`, and so on — accurate for any list, no configuration needed.
+
+**Independent sites do not.** NTS and the webpage recipes are single stations and publications. A folder named `NTS` would hold exactly one site, and only you can say what category it belongs to — `Online Radio` for one reader, `Archives` or `Music` for another. These land at the OPML root and tell you which variable to set:
+
+```bash
+RSS_DEFAULT_GROUP_NTS="Online Radio"
+RSS_DEFAULT_GROUP_WEBPAGE="Online Radio"
+```
+
+Put those in `data/private.env` and every later subscribe inherits them. The same variables override a platform default if you disagree with one — `RSS_DEFAULT_GROUP_BANDCAMP="Music"` beats the built-in `Bandcamp`.
+
+Per source, override or opt out entirely:
+
+```bash
+--group "Your Folder"   # file it somewhere else
+--group ""              # keep it at the OPML root
+```
+
+`subscribe-feed-url` and `add` also start at the root unless `--kind` names a platform, since `auto`, `website`, `newsletter`, and `other` point at no single upstream.
+
+Use `set-folder --private` when the source itself lives in the ignored private overlay.
+
+> **Open decision.** Grouping is still per adapter, so every Bandcamp feed shares one folder. That suits a list dominated by one source type and suits nobody who would rather sort by genre, label, or reading priority. Moving to per-feed group assignment means choosing a mechanism — a per-source rule, a mapping file, or a prompt at subscribe time — and deciding what re-import does to hand-placed feeds. `RSS_DEFAULT_GROUP_<ADAPTER>` is a stopgap, not that answer. Worth settling before these defaults harden into an assumption. See `PLATFORM_GROUPS` and `INDEPENDENT_SITE_KEYS` in `src/netnewswire_feed_booster/cli.py`.
 
 To move one saved source, provide its exact source ID, site URL, feed URL, or unique title followed by the folder names from top level to leaf:
 
