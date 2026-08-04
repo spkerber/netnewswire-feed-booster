@@ -11,8 +11,8 @@ requires-python = ">=3.9"
 
 [project.optional-dependencies]
 modal = [
-  "fastapi[standard]",
-  "modal",
+  "fastapi[standard]>=0.115.8",
+  "modal>=1.5.3",
 ]
 
 [project.scripts]
