@@ -19,11 +19,13 @@ MODAL_SECRET_NAME = os.environ.get("MODAL_SECRET_NAME", "rss-feed-bridge-token")
 MODAL_VOLUME_NAME = os.environ.get("MODAL_VOLUME_NAME", f"{APP_NAME}-cache")
 LOCAL_DATA_PATH = Path(os.environ.get("RSS_SOURCES_FILE", f"data/sources.{RSS_PROFILE}.json" if Path(f"data/sources.{RSS_PROFILE}.json").exists() else "data/sources.json"))
 DATA_PATH = Path("/root/data/sources.json")
-SEED_DIR = Path("/root/seed/bandcamp")
-GENERATED_SEED_DIR = Path("/root/seed/generated")
+# One cache/seed directory for every generated adapter, Bandcamp included — they
+# all now serve from the same /feeds/<token>/generated/<id>.rss route. Bandcamp
+# still gets its own refresh function below (fan-collection pagination doesn't
+# fit the shared render(source, content) -> str path), just not its own storage.
+SEED_DIR = Path("/root/seed/generated")
 CACHE_ROOT = Path("/cache")
-CACHE_DIR = CACHE_ROOT / "bandcamp"
-GENERATED_CACHE_DIR = CACHE_ROOT / "generated"
+CACHE_DIR = CACHE_ROOT / "generated"
 VALIDATOR_DIR = CACHE_ROOT / "validators"
 REFRESH_STATE_DIR = CACHE_ROOT / "refresh-state"
 FAN_MAX_ITEMS = 40
@@ -56,7 +58,6 @@ image = (
     .env({"PYTHONPATH": "/root/src", "RSS_PROFILE": RSS_PROFILE})
     .add_local_dir("src/netnewswire_feed_booster", "/root/src/netnewswire_feed_booster")
     .add_local_file(LOCAL_DATA_PATH, "/root/data/sources.json")
-    .add_local_dir("exports/bandcamp", "/root/seed/bandcamp")
     .add_local_dir("exports/generated", "/root/seed/generated")
 )
 cache_volume = modal.Volume.from_name(MODAL_VOLUME_NAME, create_if_missing=True)
@@ -75,20 +76,6 @@ def _seed_path(source_id: str) -> Path:
 
     source_id = validate_source_id(source_id)
     return SEED_DIR / f"{source_id}.rss"
-
-
-def _generated_cache_path(source_id: str) -> Path:
-    from netnewswire_feed_booster.rss_safety import validate_source_id
-
-    source_id = validate_source_id(source_id)
-    return GENERATED_CACHE_DIR / f"{source_id}.rss"
-
-
-def _generated_seed_path(source_id: str) -> Path:
-    from netnewswire_feed_booster.rss_safety import validate_source_id
-
-    source_id = validate_source_id(source_id)
-    return GENERATED_SEED_DIR / f"{source_id}.rss"
 
 
 def _validator_path(source_id: str) -> Path:
@@ -245,15 +232,15 @@ def _refresh_generated_source(source) -> str:
         raise ValueError(f"Generated source is not refreshable: {source.id}")
     content = _fetch_source_text(source, adapter.upstream_url(source), adapter)
     if content is None:
-        rss = _read_cached_or_seeded_generated_rss(source.id)
+        rss = _read_cached_or_seeded_rss(source.id)
         if rss is None:
             raise ValueError(f"{adapter.name} returned 304 without a cached feed: {source.id}")
         return rss
     rss = adapter.render(source, content)
 
     rss = _limit_rss_items(_ensure_rss(rss))
-    GENERATED_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    _generated_cache_path(source.id).write_text(rss, encoding="utf-8")
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    _cache_path(source.id).write_text(rss, encoding="utf-8")
     return rss
 
 
@@ -293,7 +280,6 @@ def _prune_retired_cache_files() -> int:
     removed = 0
     for directory, suffix in (
         (CACHE_DIR, ".rss"),
-        (GENERATED_CACHE_DIR, ".rss"),
         (VALIDATOR_DIR, ".json"),
         (REFRESH_STATE_DIR, ".json"),
     ):
@@ -314,21 +300,6 @@ def _read_cached_or_seeded_rss(source_id: str) -> Optional[str]:
         return rss
 
     seed_path = _seed_path(source_id)
-    rss = _read_rss_file(seed_path)
-    if rss is not None:
-        return rss
-
-    return None
-
-
-def _read_cached_or_seeded_generated_rss(source_id: str) -> Optional[str]:
-    _reload_cache_volume()
-    path = _generated_cache_path(source_id)
-    rss = _read_rss_file(path)
-    if rss is not None:
-        return rss
-
-    seed_path = _generated_seed_path(source_id)
     rss = _read_rss_file(seed_path)
     if rss is not None:
         return rss
@@ -359,29 +330,9 @@ def web():
     def favicon():
         return Response(status_code=204)
 
-    @web_app.get("/feeds/bandcamp/{source_id}.rss")
-    def public_bandcamp_feed(source_id: str):
-        raise HTTPException(status_code=404, detail="Tokenized feed URL required")
-
     @web_app.get("/feeds/generated/{source_id}.rss")
     def public_generated_feed(source_id: str):
         raise HTTPException(status_code=404, detail="Tokenized feed URL required")
-
-    @web_app.get("/feeds/{feed_token}/bandcamp/{source_id}.rss")
-    def bandcamp_feed(feed_token: str, source_id: str):
-        if not _token_is_valid(feed_token):
-            raise HTTPException(status_code=404, detail="Unknown feed")
-
-        source = _source_for_route(source_id, "bandcamp")
-        if source is None:
-            raise HTTPException(status_code=404, detail="Unknown active Bandcamp source")
-
-        try:
-            rss = require_cached_feed(_read_cached_or_seeded_rss(source_id), "Bandcamp")
-        except FeedWaitingForRefresh as error:
-            raise HTTPException(status_code=503, detail=str(error)) from error
-
-        return Response(content=rss, media_type="application/rss+xml; charset=utf-8", headers={"Cache-Control": READER_CACHE_CONTROL})
 
     @web_app.get("/feeds/{feed_token}/generated/{source_id}.rss")
     def generated_feed(feed_token: str, source_id: str):
@@ -393,7 +344,7 @@ def web():
             raise HTTPException(status_code=404, detail="Unknown active generated source")
 
         try:
-            rss = require_cached_feed(_read_cached_or_seeded_generated_rss(source_id), "Generated")
+            rss = require_cached_feed(_read_cached_or_seeded_rss(source_id), "Generated")
         except FeedWaitingForRefresh as error:
             raise HTTPException(status_code=503, detail=str(error)) from error
 
@@ -414,7 +365,10 @@ def web():
     timeout=900,
 )
 def refresh_bandcamp_cache() -> dict:
-    return _refresh_due_sources(_active_sources_for_route("bandcamp"), _refresh_source, prune_retired=True)
+    from netnewswire_feed_booster.generated_adapters import BANDCAMP_ADAPTER, adapter_for_source
+
+    sources = [s for s in _active_sources_for_route("generated") if adapter_for_source(s) is BANDCAMP_ADAPTER]
+    return _refresh_due_sources(sources, _refresh_source, prune_retired=True)
 
 
 @app.function(
@@ -424,7 +378,10 @@ def refresh_bandcamp_cache() -> dict:
     timeout=900,
 )
 def refresh_generated_cache() -> dict:
-    return _refresh_due_sources(_active_sources_for_route("generated"), _refresh_generated_source)
+    from netnewswire_feed_booster.generated_adapters import BANDCAMP_ADAPTER, adapter_for_source
+
+    sources = [s for s in _active_sources_for_route("generated") if adapter_for_source(s) is not BANDCAMP_ADAPTER]
+    return _refresh_due_sources(sources, _refresh_generated_source)
 
 
 def _refresh_due_sources(sources, refresh_source, prune_retired: bool = False) -> dict:

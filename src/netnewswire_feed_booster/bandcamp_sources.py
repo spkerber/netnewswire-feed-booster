@@ -30,8 +30,8 @@ def build_bandcamp_source_from_url(
 
     html = fetch_text(
         site_url if is_fan else f"{site_url}/music",
-        allowed_hosts=BANDCAMP_ADAPTER.allowed_hosts,
-        allowed_suffixes=BANDCAMP_ADAPTER.allowed_suffixes,
+        allowed_hosts=BANDCAMP_ADAPTER.allowed_hosts_for(candidate),
+        allowed_suffixes=BANDCAMP_ADAPTER.allowed_suffixes_for(candidate),
     )
     resolved_title = title.strip() or bandcamp_title_from_page(html, fallback=parsed.netloc)
     source_title = (

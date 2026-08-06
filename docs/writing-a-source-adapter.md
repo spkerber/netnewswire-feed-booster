@@ -1,6 +1,6 @@
 # Writing A Source Adapter
 
-Add an adapter only when a public source has no useful native RSS, Atom, or JSON Feed. Prefer direct feed discovery first: direct feeds are simpler, preserve the publisher's intended format, and do not consume bridge resources.
+Add an adapter only when a public source has no useful native RSS, Atom, or JSON Feed. Prefer direct feed discovery first: direct feeds are simpler, preserve the publisher's intended format, and do not consume bridge resources. If the source does have a stable native feed URL — even if it takes a resolve step, an ID lookup, or a domain template to find it — see [Writing A Direct Feed Source](writing-a-direct-feed-source.md) instead.
 
 Reddit is usually a direct-feed case rather than an adapter case. Use its public `.rss` URLs where available. A source such as Mixcloud needs an adapter because the public profile does not advertise a standard feed but has a stable public cloudcasts API.
 
@@ -13,9 +13,11 @@ Every generated source belongs in `generated_adapters.py`. An adapter must defin
 - The approved upstream host or suffix allowlist.
 - A deterministic upstream request URL.
 - A transformation from the public response to valid RSS.
-- Its hosted route type: `bandcamp` or generic `generated`.
+- `hosted_route = "generated"`. Every adapter shares this one route and cache; there is no per-adapter route to choose.
 
 The Modal bridge only recognizes adapters in this registry. It serves cached or seeded RSS to readers and never fetches upstream during a reader request. The scheduled job performs the upstream fetch, uses conditional HTTP validators when available, and has a bounded source count per run.
+
+Sharing a route does not mean sharing a refresh path. If your source needs more than one fetch, pagination, or per-source caps, the shared `render(source, content) -> str` signature won't fit — Bandcamp is the existing example, with its own scheduled refresh function (`refresh_bandcamp_cache` in `modal_bandcamp_app.py`) dispatched by adapter identity (`adapter is BANDCAMP_ADAPTER`), not by `hosted_route`. Follow that pattern rather than routing your adapter's sources through the generic `refresh_generated_cache` path if a single fetch can't produce the full feed.
 
 ## Mixcloud Example
 

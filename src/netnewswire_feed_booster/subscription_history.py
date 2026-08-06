@@ -99,7 +99,11 @@ class SubscriptionHistoryStore:
             "schema_version": self.data.get("schema_version", 1),
             "entries": [entry.to_dict() for entry in self.entries()],
         }
-        self.path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        text = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+        # Atomic write, matching FeedStore.save() — see its comment for why.
+        tmp_path = self.path.with_name(f"{self.path.name}.tmp-{os.getpid()}")
+        tmp_path.write_text(text, encoding="utf-8")
+        os.replace(tmp_path, self.path)
         self.data = payload
 
     def entries(self) -> List[SubscriptionHistoryEntry]:

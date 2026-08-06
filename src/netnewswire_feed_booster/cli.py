@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import time
 from collections import Counter
 from pathlib import Path
 from typing import Optional
@@ -10,6 +11,7 @@ from urllib.parse import urlparse
 from .bandcamp import (
     write_bandcamp_collection_rss,
 )
+from .bandcamp_following import import_bandcamp_following
 from .bandcamp_sources import build_bandcamp_source_from_url
 from .subscription_history import SubscriptionHistoryStore, default_subscription_history_path
 from .feed_store import FeedStore, Source, default_private_sources_path, default_sources_path, normalize_url, slugify, source_id_from_title
@@ -29,14 +31,14 @@ from .bridge_policy import (
     DEFAULT_REFRESH_SCHEDULE_HOURS,
     refresh_route_plan,
 )
-from .hosted_bandcamp import bandcamp_fetch_url, bandcamp_items_for_source, sources_with_hosted_bandcamp_feeds
+from .hosted_bandcamp import bandcamp_fetch_url, bandcamp_items_for_source, sources_with_hosted_generated_feeds
 from .hosted_bandcamp import render_bandcamp_source_rss
 from .nts import parse_nts_show_html
 from .mixcloud import mixcloud_source
 from .opml import parse_opml, write_opml
 from .http_client import fetch_text
 from .podcasts import podcast_source_from_url
-from .soundcloud import fetch_soundcloud_following_sources
+from .soundcloud import fetch_soundcloud_following_sources, fetch_soundcloud_profile_source
 from .source_collections import (
     active_sources_with_private,
     drift_has_failures,
@@ -57,6 +59,7 @@ DEFAULT_PROFILE = os.environ.get("RSS_PROFILE", "me")
 # Which adapter a subscribe or import command speaks to. The key drives both the
 # built-in folder default and the RSS_DEFAULT_GROUP_<KEY> environment override.
 ADAPTER_KEY_BY_COMMAND = {
+    "import-bandcamp-following": "BANDCAMP",
     "import-soundcloud-following": "SOUNDCLOUD",
     "import-substack-library": "SUBSTACK",
     "import-substack-profile": "SUBSTACK",
@@ -66,6 +69,7 @@ ADAPTER_KEY_BY_COMMAND = {
     "subscribe-mixcloud-profile": "MIXCLOUD",
     "subscribe-nts-show": "NTS",
     "subscribe-podcast": "PODCAST",
+    "subscribe-soundcloud-profile": "SOUNDCLOUD",
     "subscribe-substack": "SUBSTACK",
     "subscribe-webpage-feed": "WEBPAGE",
     "subscribe-youtube": "YOUTUBE",
@@ -102,6 +106,12 @@ PLATFORM_GROUPS = {
 # with a note saying so.
 INDEPENDENT_SITE_KEYS = frozenset({"NTS", "WEBPAGE"})
 
+# Direct-feed one-off fetches don't go through a GeneratedAdapter, so they don't
+# get its host allowlist for free. Restrict them here so a redirect can't carry
+# the fetch to an unexpected host, matching every generated adapter's posture.
+YOUTUBE_HOSTS = frozenset({"www.youtube.com", "youtube.com", "m.youtube.com"})
+SUBSTACK_ALLOWED_SUFFIXES = frozenset({"substack.com"})
+
 # TODO: decide whether grouping should become per-feed rather than per-adapter.
 # The split above is still adapter-shaped: every Bandcamp feed shares one folder,
 # which suits a list dominated by one source type and suits nobody who would
@@ -131,7 +141,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     migration_parser.add_argument("reference", type=Path, help="Ignored old sources.<profile>.json file to read as migration reference")
     migration_parser.add_argument("--profile", default=DEFAULT_PROFILE)
-    migration_parser.add_argument("--bandcamp-out-dir", type=Path, default=Path("exports/bandcamp"))
+    migration_parser.add_argument("--bandcamp-out-dir", type=Path, default=Path("exports/generated"))
     migration_parser.add_argument("--generated-out-dir", type=Path, default=Path("exports/generated"))
     migration_parser.add_argument("--apply", action="store_true", help="Write the rebuilt generated-source metadata into --data")
 
@@ -229,6 +239,11 @@ def build_parser() -> argparse.ArgumentParser:
     soundcloud_following_parser.add_argument("--profile", default=DEFAULT_PROFILE)
     soundcloud_following_parser.add_argument("--group", default="")
 
+    soundcloud_profile_parser = subparsers.add_parser("subscribe-soundcloud-profile", help="Add or reactivate one public SoundCloud profile as an RSS feed, independent of anyone's following list")
+    soundcloud_profile_parser.add_argument("url")
+    soundcloud_profile_parser.add_argument("--profile", default=DEFAULT_PROFILE)
+    soundcloud_profile_parser.add_argument("--group", default="")
+
     nts_show_parser = subparsers.add_parser("subscribe-nts-show", help="Generate and subscribe to a local RSS feed for an NTS show page")
     nts_show_parser.add_argument("url")
     nts_show_parser.add_argument("--profile", default=DEFAULT_PROFILE)
@@ -252,7 +267,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     bandcamp_local_parser = subparsers.add_parser("refresh-bandcamp-local-feeds", help="Generate local RSS files for all saved Bandcamp artist and fan sources")
     bandcamp_local_parser.add_argument("--profile", default=DEFAULT_PROFILE)
-    bandcamp_local_parser.add_argument("--out-dir", type=Path, default=Path("exports/bandcamp"))
+    bandcamp_local_parser.add_argument("--out-dir", type=Path, default=Path("exports/generated"))
     bandcamp_local_parser.add_argument("--fan-max-items", type=int, default=40, help="Maximum items to fetch for followed fan collection feeds")
     bandcamp_local_parser.add_argument("--max-items", type=int, default=50, help="Maximum RSS items retained for any Bandcamp source")
     bandcamp_local_parser.add_argument(
@@ -262,6 +277,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Fan source ID to refresh without the fan item cap; can be passed multiple times",
     )
     bandcamp_local_parser.add_argument("--show-sensitive", action="store_true")
+    bandcamp_local_parser.add_argument(
+        "--pause-seconds", type=float, default=1.0, help="Delay between Bandcamp requests, so a large batch doesn't hammer their servers"
+    )
+    bandcamp_local_parser.add_argument(
+        "--save-every", type=int, default=20, help="Write progress to disk every N sources, so a long run doesn't lose work if interrupted"
+    )
 
     generated_local_parser = subparsers.add_parser(
         "refresh-generated-local-feeds",
@@ -270,6 +291,21 @@ def build_parser() -> argparse.ArgumentParser:
     generated_local_parser.add_argument("--profile", default=DEFAULT_PROFILE)
     generated_local_parser.add_argument("--out-dir", type=Path, default=Path("exports/generated"))
     generated_local_parser.add_argument("--show-sensitive", action="store_true")
+    generated_local_parser.add_argument(
+        "--pause-seconds", type=float, default=1.0, help="Delay between requests, so a large batch doesn't hammer these sites"
+    )
+    generated_local_parser.add_argument(
+        "--save-every", type=int, default=20, help="Write progress to disk every N sources, so a long run doesn't lose work if interrupted"
+    )
+
+    bandcamp_following_parser = subparsers.add_parser(
+        "import-bandcamp-following",
+        help="Import everyone a Bandcamp fan profile follows: artists/labels and other fans, queued for local RSS generation",
+    )
+    bandcamp_following_parser.add_argument("url")
+    bandcamp_following_parser.add_argument("--profile", default=DEFAULT_PROFILE)
+    bandcamp_following_parser.add_argument("--group", default="")
+    bandcamp_following_parser.add_argument("--out-dir", type=Path, default=Path("exports/generated"))
 
     bandcamp_source_parser = subparsers.add_parser("subscribe-bandcamp-source", help="Add or reactivate a Bandcamp artist/label or fan source and generate its local RSS")
     bandcamp_source_parser.add_argument("url")
@@ -277,7 +313,7 @@ def build_parser() -> argparse.ArgumentParser:
     bandcamp_source_parser.add_argument("--profile", default=DEFAULT_PROFILE)
     bandcamp_source_parser.add_argument("--group", default="")
     bandcamp_source_parser.add_argument("--source-type", choices=["auto", "artist", "fan"], default="auto")
-    bandcamp_source_parser.add_argument("--out-dir", type=Path, default=Path("exports/bandcamp"))
+    bandcamp_source_parser.add_argument("--out-dir", type=Path, default=Path("exports/generated"))
     bandcamp_source_parser.add_argument("--fan-max-items", type=int, default=40)
     bandcamp_source_parser.add_argument("--max-items", type=int, default=50, help="Maximum RSS items retained for this source")
     bandcamp_source_parser.add_argument("--no-refresh", action="store_true", help="Only update registry metadata; do not fetch Bandcamp or write local RSS")
@@ -586,7 +622,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         if args.bandcamp_feed_base:
             if not args.bandcamp_feed_token:
                 parser.error("--bandcamp-feed-token is required when --bandcamp-feed-base is set")
-            sources = sources_with_hosted_bandcamp_feeds(sources, args.bandcamp_feed_base, token=args.bandcamp_feed_token)
+            sources = sources_with_hosted_generated_feeds(sources, args.bandcamp_feed_base, token=args.bandcamp_feed_token)
         title = args.title or f"netnewswire-feed-booster: {args.profile}"
         write_opml(args.out, sources, title=title)
         print(f"Exported {len(sources)} active sources.")
@@ -715,7 +751,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 0
 
     if args.command == "import-youtube-channel-url":
-        html = fetch_text(args.url)
+        html = fetch_text(args.url, allowed_hosts=YOUTUBE_HOSTS)
         source = parse_youtube_channel_html(html, profile=args.profile, group=args.group, fallback_title=args.title)
         source_id = store.add_or_update(source)
         store.save()
@@ -731,7 +767,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 0
 
     if args.command == "import-substack-profile":
-        html = fetch_text(args.url)
+        html = fetch_text(args.url, allowed_suffixes=SUBSTACK_ALLOWED_SUFFIXES)
         sources = parse_substack_profile_html(html, profile=args.profile, group=args.group)
         for source in sources:
             store.add_or_update(source)
@@ -754,6 +790,14 @@ def main(argv: Optional[list[str]] = None) -> int:
             store.add_or_update(source)
         store.save()
         print(f"Imported {len(sources)} SoundCloud following sources.")
+        return 0
+
+    if args.command == "subscribe-soundcloud-profile":
+        source = fetch_soundcloud_profile_source(args.url, profile=args.profile, group=args.group)
+        source_id = store.add_or_update(source)
+        store.set_status(source_id, "active")
+        store.save()
+        print(f"Subscribed SoundCloud source {source_id}.")
         return 0
 
     if args.command == "subscribe-nts-show":
@@ -870,44 +914,54 @@ def main(argv: Optional[list[str]] = None) -> int:
         ]
         bandcamp_sources.sort(key=lambda indexed_source: (indexed_source[1].id not in full_fan_source_ids, indexed_source[0]))
 
+        processed = 0
         for _, source in bandcamp_sources:
             if source.source == "bandcamp-generated-music-feed":
                 continue
 
             try:
-                html = fetch_text(
-                    bandcamp_fetch_url(source),
-                    allowed_hosts=BANDCAMP_ADAPTER.allowed_hosts,
-                    allowed_suffixes=BANDCAMP_ADAPTER.allowed_suffixes,
-                )
-                items = bandcamp_items_for_source(
-                    source,
-                    html,
-                    fan_max_items=args.fan_max_items,
-                    full_fan_source_ids=full_fan_source_ids,
-                    max_items=args.max_items,
-                )
-                if not items:
-                    failed += 1
-                    detail = source.site_url if args.show_sensitive else "[details redacted; use --show-sensitive]"
-                    print(f"FAILED\t{source.id}\tNo items found\t{detail}")
-                    continue
+                try:
+                    html = fetch_text(
+                        bandcamp_fetch_url(source),
+                        allowed_hosts=BANDCAMP_ADAPTER.allowed_hosts_for(source),
+                        allowed_suffixes=BANDCAMP_ADAPTER.allowed_suffixes_for(source),
+                    )
+                    items = bandcamp_items_for_source(
+                        source,
+                        html,
+                        fan_max_items=args.fan_max_items,
+                        full_fan_source_ids=full_fan_source_ids,
+                        max_items=args.max_items,
+                    )
+                    if not items:
+                        failed += 1
+                        detail = source.site_url if args.show_sensitive else "[details redacted; use --show-sensitive]"
+                        print(f"FAILED\t{source.id}\tNo items found\t{detail}")
+                        continue
 
-                out_path = args.out_dir / f"{source.id}.rss"
-                write_bandcamp_collection_rss(out_path, profile_url=source.site_url, title=source.title, items=items)
-                source.feed_url = out_path.resolve().as_uri()
-                source.source = "bandcamp-local-generated"
-                source.notes = "Generated local RSS feed from the saved Bandcamp source page because OpenRSS did not mirror this Bandcamp feed reliably."
-                updated += 1
-                print(f"UPDATED\t{source.id}\t{len(items)} items")
-            except Exception as error:
-                failed += 1
-                detail = (
-                    f"{type(error).__name__}: {error}\t{source.site_url}"
-                    if args.show_sensitive
-                    else f"{type(error).__name__}\t[details redacted; use --show-sensitive]"
-                )
-                print(f"FAILED\t{source.id}\t{detail}")
+                    out_path = args.out_dir / f"{source.id}.rss"
+                    write_bandcamp_collection_rss(out_path, profile_url=source.site_url, title=source.title, items=items)
+                    source.feed_url = out_path.resolve().as_uri()
+                    source.source = "bandcamp-local-generated"
+                    source.notes = "Generated local RSS feed from the saved Bandcamp source page because OpenRSS did not mirror this Bandcamp feed reliably."
+                    updated += 1
+                    print(f"UPDATED\t{source.id}\t{len(items)} items")
+                except Exception as error:
+                    failed += 1
+                    detail = (
+                        f"{type(error).__name__}: {error}\t{source.site_url}"
+                        if args.show_sensitive
+                        else f"{type(error).__name__}\t[details redacted; use --show-sensitive]"
+                    )
+                    print(f"FAILED\t{source.id}\t{detail}")
+            finally:
+                processed += 1
+                if args.save_every > 0 and processed % args.save_every == 0:
+                    store.set_sources(sources)
+                    store.save()
+                    print(f"...progress saved ({updated} updated, {failed} failed so far)")
+                if args.pause_seconds > 0:
+                    time.sleep(args.pause_seconds)
 
         store.set_sources(sources)
         store.save()
@@ -918,39 +972,60 @@ def main(argv: Optional[list[str]] = None) -> int:
     if args.command == "refresh-generated-local-feeds":
         updated = 0
         failed = 0
+        processed = 0
         sources = store.sources()
         for source in sources:
             if source.status != "active" or args.profile not in source.profiles:
                 continue
+            adapter = adapter_for_source(source)
+            if adapter is None or adapter.hosted_route != "generated" or adapter is BANDCAMP_ADAPTER:
+                # Bandcamp shares the "generated" route but keeps its own refresh
+                # path (refresh-bandcamp-local-feeds) for fan-collection pagination.
+                continue
             try:
-                adapter = adapter_for_source(source)
-                if adapter is None or adapter.hosted_route != "generated":
-                    continue
-                adapter.validate(source)
-                content = fetch_text(
-                    adapter.upstream_url(source),
-                    allowed_hosts=adapter.allowed_hosts_for(source),
-                    allowed_suffixes=adapter.allowed_suffixes_for(source),
-                )
-                rss = adapter.render(source, content)
-                out_path = args.out_dir / f"{source.id}.rss"
-                out_path.parent.mkdir(parents=True, exist_ok=True)
-                out_path.write_text(rss, encoding="utf-8")
-                source.feed_url = out_path.resolve().as_uri()
-                updated += 1
-                print(f"UPDATED\t{source.id}")
-            except Exception as error:
-                failed += 1
-                detail = (
-                    f"{type(error).__name__}: {error}\t{source.site_url}"
-                    if args.show_sensitive
-                    else f"{type(error).__name__}\t[details redacted; use --show-sensitive]"
-                )
-                print(f"FAILED\t{source.id}\t{detail}")
+                try:
+                    adapter.validate(source)
+                    content = fetch_text(
+                        adapter.upstream_url(source),
+                        allowed_hosts=adapter.allowed_hosts_for(source),
+                        allowed_suffixes=adapter.allowed_suffixes_for(source),
+                    )
+                    rss = adapter.render(source, content)
+                    out_path = args.out_dir / f"{source.id}.rss"
+                    out_path.parent.mkdir(parents=True, exist_ok=True)
+                    out_path.write_text(rss, encoding="utf-8")
+                    source.feed_url = out_path.resolve().as_uri()
+                    updated += 1
+                    print(f"UPDATED\t{source.id}")
+                except Exception as error:
+                    failed += 1
+                    detail = (
+                        f"{type(error).__name__}: {error}\t{source.site_url}"
+                        if args.show_sensitive
+                        else f"{type(error).__name__}\t[details redacted; use --show-sensitive]"
+                    )
+                    print(f"FAILED\t{source.id}\t{detail}")
+            finally:
+                processed += 1
+                if args.save_every > 0 and processed % args.save_every == 0:
+                    store.set_sources(sources)
+                    store.save()
+                    print(f"...progress saved ({updated} updated, {failed} failed so far)")
+                if args.pause_seconds > 0:
+                    time.sleep(args.pause_seconds)
         store.set_sources(sources)
         store.save()
         print(f"Updated local generated feeds: {updated}")
         print(f"Failed local generated feeds: {failed}")
+        return 0
+
+    if args.command == "import-bandcamp-following":
+        sources = import_bandcamp_following(args.url, profile=args.profile, group=args.group, out_dir=args.out_dir)
+        for source in sources:
+            store.add_or_update(source)
+        store.save()
+        print(f"Imported {len(sources)} Bandcamp following sources.")
+        print("Their RSS isn't generated yet — run refresh-bandcamp-local-feeds to populate it.")
         return 0
 
     if args.command == "subscribe-bandcamp-source":
@@ -968,8 +1043,8 @@ def main(argv: Optional[list[str]] = None) -> int:
                 source,
                 fetcher=lambda url: fetch_text(
                     url,
-                    allowed_hosts=BANDCAMP_ADAPTER.allowed_hosts,
-                    allowed_suffixes=BANDCAMP_ADAPTER.allowed_suffixes,
+                    allowed_hosts=BANDCAMP_ADAPTER.allowed_hosts_for(source),
+                    allowed_suffixes=BANDCAMP_ADAPTER.allowed_suffixes_for(source),
                 ),
                 fan_max_items=args.fan_max_items,
                 full_fan_source_ids=set(),
@@ -1123,14 +1198,20 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 1 if failures else 0
 
     if args.command == "refresh-plan":
+        # Bandcamp and the rest of the "generated" route are scheduled and batched
+        # independently (see refresh_bandcamp_cache/refresh_generated_cache in
+        # modal_bandcamp_app.py), so the capacity report still splits on adapter
+        # identity even though both now share one hosted_route.
         route_counts: Counter[str] = Counter()
         direct_count = 0
         for source in store.active_sources(args.profile):
             adapter = adapter_for_source(source)
             if adapter is None:
                 direct_count += 1
+            elif adapter is BANDCAMP_ADAPTER:
+                route_counts["bandcamp"] += 1
             else:
-                route_counts[adapter.hosted_route] += 1
+                route_counts["generated"] += 1
 
         print(f"Refresh plan for profile: {args.profile}")
         print(

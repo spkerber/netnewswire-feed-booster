@@ -45,10 +45,10 @@ def netnewswire_drift_report(
     current_urls = {source.feed_url for source in current_sources}
     unsubscribed_urls = {source.feed_url for source in unsubscribed_sources}
 
-    stale_file_bandcamp = [
+    stale_file_generated = [
         source
         for source in current_sources
-        if source.feed_url.startswith("file://") and "/exports/bandcamp/" in source.feed_url
+        if source.feed_url.startswith("file://") and "/exports/generated/" in source.feed_url
     ]
     tokenless_modal = [
         source
@@ -56,7 +56,7 @@ def netnewswire_drift_report(
         if "/feeds/bandcamp/" in source.feed_url or "/feeds/generated/" in source.feed_url
     ]
     unsubscribed = [source for source in current_sources if source.feed_url in unsubscribed_urls]
-    classified_urls = {source.feed_url for source in stale_file_bandcamp + tokenless_modal + unsubscribed}
+    classified_urls = {source.feed_url for source in stale_file_generated + tokenless_modal + unsubscribed}
     unexpected = [
         source
         for source in current_sources
@@ -67,7 +67,7 @@ def netnewswire_drift_report(
     return {
         "missing": sorted(missing, key=lambda source: source.title.lower()),
         "unexpected": sorted(unexpected, key=lambda source: source.title.lower()),
-        "stale_file_bandcamp": sorted(stale_file_bandcamp, key=lambda source: source.title.lower()),
+        "stale_file_generated": sorted(stale_file_generated, key=lambda source: source.title.lower()),
         "tokenless_modal": sorted(tokenless_modal, key=lambda source: source.title.lower()),
         "unsubscribed": sorted(unsubscribed, key=lambda source: source.title.lower()),
     }

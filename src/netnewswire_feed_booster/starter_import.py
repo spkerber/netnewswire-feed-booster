@@ -101,8 +101,8 @@ def build_starter_import(
                 source,
                 fetcher=lambda url: fetch_text(
                     url,
-                    allowed_hosts=BANDCAMP_ADAPTER.allowed_hosts,
-                    allowed_suffixes=BANDCAMP_ADAPTER.allowed_suffixes,
+                    allowed_hosts=BANDCAMP_ADAPTER.allowed_hosts_for(source),
+                    allowed_suffixes=BANDCAMP_ADAPTER.allowed_suffixes_for(source),
                 ),
             )
             validate_feed_text(rss)

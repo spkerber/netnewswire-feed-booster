@@ -2,14 +2,15 @@
 
 Use an HTTPS bridge only for generated local RSS that NetNewsWire cannot refresh reliably through `file://`. Direct HTTPS feeds stay direct.
 
-The bridge serves tokenized routes such as:
+The bridge serves one tokenized route for every generated adapter, Bandcamp included:
 
 ```text
-/feeds/<token>/bandcamp/<source-id>.rss
 /feeds/<token>/generated/<source-id>.rss
 ```
 
 Tokenless routes return `404`. This makes stale imports visible in logs rather than accidentally exposing feeds.
+
+Bandcamp shares this route and cache with every other generated adapter, but keeps its own scheduled refresh function (`refresh_bandcamp_cache` in `modal_bandcamp_app.py`) because fan-collection pagination, a fan item cap, and a full-fan override list don't fit the single-fetch `render(source, content)` shape the other adapters use.
 
 ## Host Options
 

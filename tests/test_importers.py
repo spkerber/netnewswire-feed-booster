@@ -1,4 +1,7 @@
 import unittest
+import zipfile
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from netnewswire_feed_booster.bandcamp import (
@@ -13,6 +16,8 @@ from netnewswire_feed_booster.soundcloud import (
     extract_soundcloud_api_client_id,
     extract_soundcloud_app_version,
     extract_soundcloud_user_id,
+    fetch_soundcloud_profile_source,
+    soundcloud_resolve_api_url,
     soundcloud_user_source,
 )
 from netnewswire_feed_booster.substack import (
@@ -20,10 +25,13 @@ from netnewswire_feed_booster.substack import (
     parse_substack_profile_html,
 )
 from netnewswire_feed_booster.youtube import (
+    find_youtube_subscriptions_csv,
     parse_youtube_channel_html,
+    parse_youtube_subscriptions_file,
     parse_youtube_subscriptions_html,
     parse_youtube_subscriptions_csv,
     parse_youtube_subscription_lines,
+    read_youtube_subscriptions_csv_from_zip,
 )
 
 
@@ -108,7 +116,7 @@ class SourceImporterTests(unittest.TestCase):
             def read(self, size: int) -> bytes:
                 return b"x" * size
 
-        with patch("urllib.request.urlopen", return_value=Response()):
+        with patch("urllib.request.OpenerDirector.open", return_value=Response()):
             with self.assertRaises(ValueError):
                 fetch_text("https://example.com/feed", max_bytes=4)
 
@@ -155,6 +163,82 @@ class SourceImporterTests(unittest.TestCase):
         self.assertEqual(len(sources), 1)
         self.assertEqual(sources[0].title, "Fixture Channel")
         self.assertEqual(sources[0].site_url, "https://www.youtube.com/@fixture-channel")
+
+    def test_find_youtube_subscriptions_csv_searches_any_nesting_depth(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            nested = root / "Takeout" / "YouTube and YouTube Music" / "subscriptions"
+            nested.mkdir(parents=True)
+            csv_path = nested / "subscriptions.csv"
+            csv_path.write_text("Channel Id,Channel Url,Channel Title\nUC1,https://www.youtube.com/channel/UC1,Example\n")
+
+            found = find_youtube_subscriptions_csv(root)
+
+        self.assertEqual(found, csv_path)
+
+    def test_find_youtube_subscriptions_csv_returns_none_when_missing(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            found = find_youtube_subscriptions_csv(Path(tmp_dir))
+
+        self.assertIsNone(found)
+
+    def test_parse_youtube_subscriptions_file_searches_an_extracted_takeout_folder(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            nested = root / "Takeout" / "YouTube and YouTube Music" / "subscriptions"
+            nested.mkdir(parents=True)
+            (nested / "subscriptions.csv").write_text(
+                "Channel Id,Channel Url,Channel Title\n"
+                "UC12345678901,https://www.youtube.com/channel/UC12345678901,Example Channel\n"
+            )
+
+            sources = parse_youtube_subscriptions_file(root, profile="test-user", group="YouTube")
+
+        self.assertEqual(len(sources), 1)
+        self.assertEqual(sources[0].title, "Example Channel")
+
+    def test_parse_youtube_subscriptions_file_raises_clear_error_when_folder_has_no_csv(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            with self.assertRaisesRegex(FileNotFoundError, "Could not find subscriptions.csv"):
+                parse_youtube_subscriptions_file(Path(tmp_dir), profile="test-user", group="YouTube")
+
+    def test_read_youtube_subscriptions_csv_from_zip_searches_any_nesting_depth(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            zip_path = Path(tmp_dir) / "takeout.zip"
+            with zipfile.ZipFile(zip_path, "w") as archive:
+                archive.writestr(
+                    "Takeout/YouTube and YouTube Music/subscriptions/subscriptions.csv",
+                    "Channel Id,Channel Url,Channel Title\n"
+                    "UC12345678901,https://www.youtube.com/channel/UC12345678901,Example Channel\n",
+                )
+
+            text = read_youtube_subscriptions_csv_from_zip(zip_path)
+
+        self.assertIn("Example Channel", text)
+
+    def test_parse_youtube_subscriptions_file_reads_a_takeout_zip_directly(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            zip_path = Path(tmp_dir) / "takeout.zip"
+            with zipfile.ZipFile(zip_path, "w") as archive:
+                archive.writestr(
+                    "Takeout/YouTube and YouTube Music/subscriptions/subscriptions.csv",
+                    "Channel Id,Channel Url,Channel Title\n"
+                    "UC12345678901,https://www.youtube.com/channel/UC12345678901,Example Channel\n",
+                )
+
+            sources = parse_youtube_subscriptions_file(zip_path, profile="test-user", group="YouTube")
+
+        self.assertEqual(len(sources), 1)
+        self.assertEqual(sources[0].title, "Example Channel")
+
+    def test_read_youtube_subscriptions_csv_from_zip_raises_clear_error_when_missing(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            zip_path = Path(tmp_dir) / "takeout.zip"
+            with zipfile.ZipFile(zip_path, "w") as archive:
+                archive.writestr("Takeout/YouTube and YouTube Music/watch-history.json", "{}")
+
+            with self.assertRaisesRegex(FileNotFoundError, "Could not find subscriptions.csv"):
+                read_youtube_subscriptions_csv_from_zip(zip_path)
 
     def test_parse_youtube_plain_list(self) -> None:
         sources = parse_youtube_subscription_lines(
@@ -263,6 +347,61 @@ class SourceImporterTests(unittest.TestCase):
         self.assertEqual(source.title, "SoundCloud: Zorblax Quiver")
         self.assertEqual(source.feed_url, "https://feeds.soundcloud.com/users/soundcloud:users:999999/sounds.rss")
         self.assertEqual(source.site_url, "https://soundcloud.com/zorblax-quiver")
+
+    def test_soundcloud_resolve_api_url(self) -> None:
+        url = soundcloud_resolve_api_url("https://soundcloud.com/zorblax-quiver", "client-123", app_version="42")
+
+        self.assertIn("url=https%3A%2F%2Fsoundcloud.com%2Fzorblax-quiver", url)
+        self.assertIn("client_id=client-123", url)
+        self.assertIn("app_version=42", url)
+
+    def test_fetch_soundcloud_profile_source_resolves_single_profile(self) -> None:
+        fetched_urls: list[str] = []
+
+        def fake_fetcher(url: str) -> str:
+            fetched_urls.append(url)
+            return SOUNDCLOUD_HTML
+
+        def fake_json_fetcher(url: str) -> dict:
+            fetched_urls.append(url)
+            self.assertIn("resolve", url)
+            return {
+                "id": 51978385,
+                "username": "Zorblax Quiver",
+                "permalink_url": "https://soundcloud.com/zorblax-quiver",
+            }
+
+        source = fetch_soundcloud_profile_source(
+            "https://soundcloud.com/zorblax-quiver/",
+            profile="test-user",
+            fetcher=fake_fetcher,
+            json_fetcher=fake_json_fetcher,
+        )
+
+        self.assertEqual(source.id, "soundcloud-zorblax-quiver-51978385")
+        self.assertEqual(source.title, "SoundCloud: Zorblax Quiver")
+        self.assertEqual(source.feed_url, "https://feeds.soundcloud.com/users/soundcloud:users:51978385/sounds.rss")
+        self.assertEqual(source.groups, ["SoundCloud"])
+        self.assertNotIn("following list", source.notes)
+        # The profile page is only fetched once, to read the client ID/app version, never the following list.
+        self.assertEqual(fetched_urls[0], "https://soundcloud.com/zorblax-quiver")
+
+    def test_fetch_soundcloud_profile_source_default_fetcher_rejects_non_soundcloud_host(self) -> None:
+        # Uses the real default fetcher (no fetcher/json_fetcher override) to prove the
+        # host allowlist is actually wired into production usage, not just available.
+        with patch("urllib.request.urlopen") as urlopen:
+            with self.assertRaisesRegex(ValueError, "Unsafe fetch URL"):
+                fetch_soundcloud_profile_source("https://metadata.example/zorblax-quiver", profile="test-user")
+        urlopen.assert_not_called()
+
+    def test_fetch_soundcloud_profile_source_raises_when_unresolved(self) -> None:
+        with self.assertRaises(ValueError):
+            fetch_soundcloud_profile_source(
+                "https://soundcloud.com/nobody",
+                profile="test-user",
+                fetcher=lambda url: SOUNDCLOUD_HTML,
+                json_fetcher=lambda url: {},
+            )
 
     def test_parse_bandcamp_artist_music_html(self) -> None:
         items = parse_bandcamp_artist_music_html(BANDCAMP_ARTIST_MUSIC_HTML, "https://fixture-artist.bandcamp.com")

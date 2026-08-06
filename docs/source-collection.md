@@ -18,13 +18,15 @@ flowchart TD
 | Source | Best input | Accepted local format or URL | Result |
 | --- | --- | --- | --- |
 | Existing reader | OPML export | `imports/netnewswire.opml` | Imports current subscriptions and folders |
-| YouTube, many channels | Google Takeout export | CSV named `subscriptions.csv` | Official direct channel feeds |
+| YouTube, many channels | Google Takeout export | The Takeout `.zip`, its unzipped folder, or `subscriptions.csv` directly | Official direct channel feeds |
 | YouTube, one channel | Public channel URL | `https://www.youtube.com/@example` | Resolves stable channel ID and official feed |
 | Bandcamp | Root artist, label, or fan page | `https://artist.bandcamp.com/` | Generated RSS; optional HTTPS bridge |
 | Substack | Publication URL | `https://publication.substack.com/` | Native `/feed` where supported |
 | Podcast | Publisher RSS URL | `https://publisher.example/feed.xml` | Direct podcast feed |
 | Mixcloud | Public profile root | `https://www.mixcloud.com/example/` | Generated RSS; optional HTTPS bridge |
 | NTS | Public show page | `https://www.nts.live/shows/example` | Generated RSS; optional HTTPS bridge |
+| SoundCloud, one profile | Public profile URL | `https://soundcloud.com/example` | Resolves the account and its official profile feed |
+| SoundCloud, many profiles | Public profile URL you follow from | `https://soundcloud.com/example` | Official profile feeds for everyone that account follows |
 
 Do not upload or commit tokens, paid newsletters, private podcast URLs, cookies, account exports beyond what you need locally, or a copy of a platform page obtained while signed in.
 
@@ -130,18 +132,17 @@ Use [Google Takeout](https://takeout.google.com/) to create a local archive. Goo
 1. In Takeout, deselect everything you do not need, then select **YouTube and YouTube Music**.
 2. Open its **All data included** options and select only subscription data when Takeout offers that choice. Do not export watch history, private playlists, uploads, or other account data for this workflow.
 3. Create and download the archive to your Mac. Archive creation can take time; keep the result private.
-4. In Finder, unzip it and locate the CSV named `subscriptions.csv`. It is commonly under a `YouTube and YouTube Music` folder; the exact folder nesting can vary by Takeout version.
-5. Copy only that CSV to `imports/youtube-subscriptions.csv`.
-6. Import it locally:
+4. Move the downloaded file into `imports/` — no need to unzip it or hunt through Finder for `subscriptions.csv` first. Point the importer at whichever of these you have: the `.zip` Takeout sent you, the folder you get after double-clicking that zip to unzip it, or the CSV itself if you already found it. It searches for `subscriptions.csv` at any folder depth, since Takeout's nesting varies by version.
+5. Import it locally, using whichever path matches what you have:
 
 ```bash
 PYTHONPATH=src python3 -m netnewswire_feed_booster \
   --data "data/sources.${RSS_PROFILE}.json" \
-  import-youtube-subscriptions imports/youtube-subscriptions.csv \
+  import-youtube-subscriptions imports/takeout.zip \
   --profile "$RSS_PROFILE"
 ```
 
-The importer accepts the Takeout CSV columns `Channel Id`, `Channel Url`, and `Channel Title`. It also accepts a saved public subscriptions HTML page or a plain text file containing one public YouTube channel URL or channel ID per line. Do not provide watch history, private playlists, or account pages.
+The importer accepts the raw Takeout `.zip`, the extracted Takeout folder, the Takeout CSV columns `Channel Id`, `Channel Url`, and `Channel Title` directly, a saved public subscriptions HTML page, or a plain text file containing one public YouTube channel URL or channel ID per line. Do not provide watch history, private playlists, or account pages.
 
 ## Bandcamp
 
@@ -163,6 +164,46 @@ PYTHONPATH=src python3 -m netnewswire_feed_booster \
 ```
 
 The command creates a local generated RSS seed. Stop here unless you have confirmed that this source needs HTTPS hosting outside your local checkout. Deploying the hosted bridge creates or updates provider resources and may use credits; it is not part of first-time source collection. Read [Hosted Bridge](hosting.md) and [Slow Reading And Refresh Policy](reading-practice.md) before you approve `./scripts/netnewswire_workflow.sh deploy-modal`.
+
+## SoundCloud
+
+SoundCloud publishes an official per-account RSS feed. Both subscribe paths resolve to that same feed format; the difference is what you hand the tool.
+
+### One Profile You Like
+
+Copy the public profile URL:
+
+```text
+https://soundcloud.com/example
+```
+
+Then run:
+
+```bash
+PYTHONPATH=src python3 -m netnewswire_feed_booster \
+  --data "data/sources.${RSS_PROFILE}.json" \
+  subscribe-soundcloud-profile https://soundcloud.com/example \
+  --profile "$RSS_PROFILE"
+```
+
+This resolves the account independently of anyone's following list, so it works even if you have never followed the account, and even for an account you follow from a profile you would rather not import wholesale.
+
+### Everyone a Profile Follows
+
+Use this only when you want every public account that a specific profile follows, not one account on its own:
+
+```bash
+PYTHONPATH=src python3 -m netnewswire_feed_booster \
+  --data "data/sources.${RSS_PROFILE}.json" \
+  import-soundcloud-following https://soundcloud.com/example \
+  --profile "$RSS_PROFILE"
+```
+
+Both commands store the same official feed format:
+
+```text
+https://feeds.soundcloud.com/users/soundcloud:users:<USER_ID>/sounds.rss
+```
 
 ## Substack, Podcasts, and Other Direct Feeds
 

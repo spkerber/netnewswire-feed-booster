@@ -98,7 +98,7 @@ Treat it as private. It can reveal interests, private feed URLs, and tokenized h
 
 ### Do I need Modal?
 
-No. Direct publisher feeds, podcasts, Substack, and official YouTube feeds do not need it. Modal is an optional, supported host only for generated sources that need HTTPS outside your local checkout.
+No. Direct publisher feeds, podcasts, Substack, and official YouTube feeds do not need it. Modal is an optional, supported host only for generated sources (Bandcamp, NTS, Mixcloud) that need to work outside your local checkout — see [How Feeds Actually Work Here](../README.md#how-feeds-actually-work-here) for why.
 
 ### What is a coding harness?
 

@@ -145,7 +145,15 @@ class FeedStore:
             "schema_version": self.data.get("schema_version", 1),
             "sources": [source.to_dict() for source in self.sources()],
         }
-        self.path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        text = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+        # Atomic write (temp file + os.replace): a crash or kill mid-write must
+        # never leave a truncated registry. This matters more now that long batch
+        # commands checkpoint via save() dozens of times per run rather than once
+        # — each call is a fresh window where a bad-timed interruption could
+        # otherwise destroy the whole file, not just this run's progress.
+        tmp_path = self.path.with_name(f"{self.path.name}.tmp-{os.getpid()}")
+        tmp_path.write_text(text, encoding="utf-8")
+        os.replace(tmp_path, self.path)
         self.data = payload
 
     def sources(self) -> List[Source]:

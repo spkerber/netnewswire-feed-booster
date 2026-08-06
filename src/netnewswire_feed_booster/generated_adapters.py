@@ -86,18 +86,49 @@ def _require_https_path(source: Source, hosts: set[str], path_prefix: str) -> No
         raise ValueError(f"Unsupported {source.source} URL: {source.site_url}")
 
 
+def _is_plausible_custom_domain_hostname(hostname: str) -> bool:
+    """A hostname that could plausibly be a real custom-domain storefront: not an
+    IP literal, has at least one dot, and matches a conservative DNS-label shape
+    (same bar as configured_bandcamp_redirect_hosts). Shared by _bandcamp_matches
+    and _bandcamp_source_allowed_hosts so the trust decision doesn't depend on one
+    of them having already been called — a Source can reach the fetch layer
+    without going through adapter.validate() first (refresh-bandcamp-local-feeds
+    does exactly that), so the function that grants fetch access has to be able to
+    stand on its own.
+    """
+    if not hostname:
+        return False
+    try:
+        ipaddress.ip_address(hostname)
+    except ValueError:
+        pass
+    else:
+        return False
+    return bool(re.fullmatch(r"[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?", hostname)) and "." in hostname
+
+
 def _bandcamp_matches(source: Source) -> bool:
     if source.kind != "bandcamp":
         return False
     parsed = urlparse(source.site_url)
     hostname = (parsed.hostname or "").lower().rstrip(".")
-    return (
-        parsed.scheme == "https"
-        and (hostname == "bandcamp.com" or hostname.endswith(".bandcamp.com"))
-        and not parsed.username
-        and not parsed.password
-        and not parsed.fragment
-    )
+    if (
+        parsed.scheme != "https"
+        or not hostname
+        or parsed.username
+        or parsed.password
+        or parsed.fragment
+    ):
+        return False
+    if hostname == "bandcamp.com" or hostname.endswith(".bandcamp.com"):
+        return True
+    # Custom-domain storefronts: Bandcamp's own following-list API reports these
+    # directly for a specific followed artist (url_hints.custom_domain), so a
+    # non-bandcamp.com host here was already resolved at subscribe/import time by
+    # build_bandcamp_source_from_url or bandcamp_following_band_source — this is
+    # trusting our own already-vetted registry, not arbitrary user input. Still
+    # require a plausible hostname shape.
+    return _is_plausible_custom_domain_hostname(hostname)
 
 
 def _bandcamp_upstream_url(source: Source) -> str:
@@ -112,6 +143,24 @@ def _render_bandcamp(source: Source, content: str) -> str:
     from .hosted_bandcamp import render_bandcamp_source_rss
 
     return render_bandcamp_source_rss(source, fetcher=lambda _: content)
+
+
+def _bandcamp_source_allowed_hosts(source: Source) -> frozenset[str]:
+    """Trust this source's own site_url host for its own fetch, on top of the
+    global bandcamp.com allowlist — covers custom-domain storefronts without a
+    manually maintained list. This validates the hostname itself (same shape
+    check as _bandcamp_matches) rather than assuming some other code path already
+    did: refresh-bandcamp-local-feeds calls this directly without ever calling
+    adapter.validate() first, and a Bandcamp-kind Source can also be constructed
+    by the generic `add` command with no Bandcamp-specific vetting at all. A
+    redirect to a DIFFERENT, unexpected host during the fetch is still blocked,
+    since only this one validated host is added.
+    """
+    hostname = (urlparse(source.site_url).hostname or "").lower().rstrip(".")
+    base = frozenset({"bandcamp.com"}) | configured_bandcamp_redirect_hosts()
+    if hostname.endswith(".bandcamp.com") or _is_plausible_custom_domain_hostname(hostname):
+        return base | {hostname}
+    return base
 
 
 def _nts_matches(source: Source) -> bool:
@@ -212,14 +261,22 @@ def _render_mixcloud(source: Source, content: str) -> str:
 BANDCAMP_ADAPTER = GeneratedAdapter(
     name="Bandcamp",
     source_label="bandcamp-local-generated",
-    hosted_route="bandcamp",
-    # Some Bandcamp storefronts redirect to privately configured custom
-    # domains. Keep those exceptions exact and outside tracked source code.
+    # Bandcamp shares the "generated" route and cache with every other adapter.
+    # It still needs its own refresh path (see modal_bandcamp_app.py and
+    # refresh-bandcamp-local-feeds): fan-collection pagination, a fan item
+    # cap, and a full-fan override list don't fit the shared render(source,
+    # content) -> str signature. Dispatch on adapter identity (is BANDCAMP_ADAPTER),
+    # not on hosted_route, wherever that distinction matters.
+    hosted_route="generated",
+    # Base allowlist for sources without their own custom domain. Bandcamp storefronts
+    # on a custom domain are handled per-source below (source_allowed_hosts), not by
+    # growing this global set — see _bandcamp_source_allowed_hosts for why that's safe.
     allowed_hosts=frozenset({"bandcamp.com"}) | configured_bandcamp_redirect_hosts(),
     allowed_suffixes=frozenset({"bandcamp.com"}),
     matches=_bandcamp_matches,
     upstream_url=_bandcamp_upstream_url,
     render=_render_bandcamp,
+    source_allowed_hosts=_bandcamp_source_allowed_hosts,
 )
 NTS_ADAPTER = GeneratedAdapter(
     name="NTS",

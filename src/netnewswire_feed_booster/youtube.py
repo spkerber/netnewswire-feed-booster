@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import re
+import zipfile
 from html import unescape
 from pathlib import Path
 from typing import Iterable, Optional
@@ -30,12 +31,52 @@ def parse_youtube_channel_html(html: str, profile: str, group: str, fallback_tit
 
 
 def parse_youtube_subscriptions_file(path: Path, profile: str, group: str) -> list[Source]:
+    """Accept the exact CSV/HTML/text file, the raw Takeout zip, or the extracted Takeout folder.
+
+    Google Takeout nests subscriptions.csv at a folder depth that varies by Takeout
+    version, so rather than ask a user to find it in Finder, search for it.
+    """
+    if path.is_dir():
+        found = find_youtube_subscriptions_csv(path)
+        if found is None:
+            raise FileNotFoundError(
+                f"Could not find subscriptions.csv anywhere under {path}. "
+                "Point this at that folder, the Takeout .zip, or the CSV itself."
+            )
+        text = found.read_text(encoding="utf-8-sig")
+        return parse_youtube_subscriptions_csv(text, profile=profile, group=group)
+
+    if path.suffix.lower() == ".zip":
+        text = read_youtube_subscriptions_csv_from_zip(path)
+        return parse_youtube_subscriptions_csv(text, profile=profile, group=group)
+
     text = path.read_text(encoding="utf-8-sig")
     if path.suffix.lower() in {".html", ".htm"}:
         return parse_youtube_subscriptions_html(text, profile=profile, group=group)
     if looks_like_csv(text):
         return parse_youtube_subscriptions_csv(text, profile=profile, group=group)
     return parse_youtube_subscription_lines(text.splitlines(), profile=profile, group=group)
+
+
+def find_youtube_subscriptions_csv(root: Path) -> Optional[Path]:
+    matches = [candidate for candidate in root.rglob("*") if candidate.is_file() and candidate.name.lower() == "subscriptions.csv"]
+    if not matches:
+        return None
+    # Prefer the shallowest match in case more than one export got extracted alongside it.
+    return min(matches, key=lambda candidate: len(candidate.parts))
+
+
+def read_youtube_subscriptions_csv_from_zip(zip_path: Path) -> str:
+    with zipfile.ZipFile(zip_path) as archive:
+        candidates = [name for name in archive.namelist() if Path(name).name.lower() == "subscriptions.csv"]
+        if not candidates:
+            raise FileNotFoundError(
+                f"Could not find subscriptions.csv inside {zip_path}. "
+                "Confirm the Takeout export included YouTube subscription data."
+            )
+        candidates.sort(key=lambda name: name.count("/"))
+        with archive.open(candidates[0]) as handle:
+            return handle.read().decode("utf-8-sig")
 
 
 def parse_youtube_subscriptions_html(html: str, profile: str, group: str) -> list[Source]:

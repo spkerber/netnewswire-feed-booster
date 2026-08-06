@@ -11,24 +11,83 @@ from netnewswire_feed_booster.generated_adapters import (
     adapter_for_source,
     configured_bandcamp_redirect_hosts,
 )
-from netnewswire_feed_booster.http_client import _RestrictedRedirectHandler, fetch_text
-from netnewswire_feed_booster.hosted_bandcamp import sources_with_hosted_bandcamp_feeds
+from netnewswire_feed_booster.http_client import _RestrictedRedirectHandler, fetch_json, fetch_text
+from netnewswire_feed_booster.hosted_bandcamp import sources_with_hosted_generated_feeds
 
 
 class GeneratedAdapterTests(unittest.TestCase):
-    def test_bandcamp_adapter_rejects_non_bandcamp_hosts(self) -> None:
-        source = Source(
-            id="bad-bandcamp",
+    def test_bandcamp_source_allowed_hosts_validates_independently_of_adapter_validate(self) -> None:
+        # refresh-bandcamp-local-feeds calls allowed_hosts_for(source) directly,
+        # never adapter.validate()/_bandcamp_matches — and a kind="bandcamp" Source
+        # can also reach the registry via the generic `add` command with no
+        # Bandcamp-specific vetting at all. The trust function itself must refuse
+        # an implausible host rather than assuming it was already checked.
+        ip_literal = Source(
+            id="bad-bandcamp-ip",
             title="Bad Bandcamp",
             feed_url="file:///tmp/bad.rss",
-            site_url="https://metadata.example/",
+            site_url="https://192.0.2.10/",
             kind="bandcamp",
-            source="bandcamp-local-generated",
+            source="manual",
+        )
+        malformed = Source(
+            id="bad-bandcamp-malformed",
+            title="Bad Bandcamp",
+            feed_url="file:///tmp/bad.rss",
+            site_url="not-a-url",
+            kind="bandcamp",
+            source="manual",
+        )
+        for source in (ip_literal, malformed):
+            allowed = BANDCAMP_ADAPTER.allowed_hosts_for(source)
+            self.assertEqual(allowed, frozenset({"bandcamp.com"}) | configured_bandcamp_redirect_hosts(), source.id)
+
+    def test_bandcamp_adapter_accepts_a_custom_domain_storefront(self) -> None:
+        # Bandcamp's own following-list API reports these directly for a specific
+        # followed artist (url_hints.custom_domain) — see bandcamp_following_band_source.
+        source = Source(
+            id="bandcamp-agogo-records",
+            title="Bandcamp: Agogo Records",
+            feed_url="file:///tmp/bandcamp-agogo-records.rss",
+            site_url="https://shop.agogo-records.com",
+            kind="bandcamp",
+            source="bandcamp-following-import",
         )
 
-        self.assertIsNone(adapter_for_source(source))
-        with self.assertRaises(ValueError):
-            BANDCAMP_ADAPTER.validate(source)
+        self.assertIs(adapter_for_source(source), BANDCAMP_ADAPTER)
+        BANDCAMP_ADAPTER.validate(source)  # does not raise
+        self.assertIn("shop.agogo-records.com", BANDCAMP_ADAPTER.allowed_hosts_for(source))
+        # A different, unrelated host must still be rejected — accepting a custom
+        # domain is scoped to that source's own site_url, not a blanket allow-all.
+        self.assertNotIn("some-other-storefront.example", BANDCAMP_ADAPTER.allowed_hosts_for(source))
+
+    def test_bandcamp_adapter_rejects_structurally_invalid_hosts(self) -> None:
+        credentials = Source(
+            id="bad-bandcamp-credentials",
+            title="Bad Bandcamp",
+            feed_url="file:///tmp/bad.rss",
+            site_url="https://user:pass@fixture-artist.bandcamp.com/",
+            kind="bandcamp",
+        )
+        ip_host = Source(
+            id="bad-bandcamp-ip",
+            title="Bad Bandcamp",
+            feed_url="file:///tmp/bad.rss",
+            site_url="https://192.0.2.10/",
+            kind="bandcamp",
+        )
+        no_host = Source(
+            id="bad-bandcamp-no-host",
+            title="Bad Bandcamp",
+            feed_url="file:///tmp/bad.rss",
+            site_url="not-a-url",
+            kind="bandcamp",
+        )
+
+        for source in (credentials, ip_host, no_host):
+            self.assertIsNone(adapter_for_source(source), source.id)
+            with self.assertRaises(ValueError):
+                BANDCAMP_ADAPTER.validate(source)
 
     def test_nts_and_mixcloud_require_supported_public_url_shapes(self) -> None:
         nts = Source(
@@ -98,23 +157,39 @@ class GeneratedAdapterTests(unittest.TestCase):
         )
 
     def test_hosted_export_rewrites_only_recognized_generated_sources(self) -> None:
-        unsafe = Source(
-            id="bad-bandcamp",
-            title="Bad Bandcamp",
-            feed_url="file:///tmp/bad.rss",
-            site_url="https://metadata.example/",
+        unrecognized = Source(
+            id="not-generated",
+            title="Direct Podcast",
+            feed_url="https://publisher.example/feed.xml",
+            site_url="https://publisher.example/",
+            kind="podcast",
+        )
+        custom_domain_bandcamp = Source(
+            id="bandcamp-agogo-records",
+            title="Bandcamp: Agogo Records",
+            feed_url="file:///tmp/bandcamp-agogo-records.rss",
+            site_url="https://shop.agogo-records.com",
             kind="bandcamp",
-            source="bandcamp-local-generated",
+            source="bandcamp-following-import",
         )
 
-        rewritten = sources_with_hosted_bandcamp_feeds([unsafe], "https://example.modal.run", token="secret")
+        rewritten = sources_with_hosted_generated_feeds(
+            [unrecognized, custom_domain_bandcamp], "https://example.modal.run", token="secret"
+        )
 
-        self.assertEqual(rewritten[0].feed_url, "file:///tmp/bad.rss")
+        self.assertEqual(rewritten[0].feed_url, "https://publisher.example/feed.xml")
+        self.assertEqual(rewritten[1].feed_url, "https://example.modal.run/feeds/secret/generated/bandcamp-agogo-records.rss")
 
     def test_restricted_fetch_rejects_an_unapproved_host_before_network_io(self) -> None:
         with patch("urllib.request.urlopen") as urlopen:
             with self.assertRaisesRegex(ValueError, "Unsafe fetch URL"):
                 fetch_text("https://metadata.example/feed", allowed_hosts={"api.mixcloud.com"})
+        urlopen.assert_not_called()
+
+    def test_fetch_json_rejects_an_unapproved_host_before_network_io(self) -> None:
+        with patch("urllib.request.urlopen") as urlopen:
+            with self.assertRaisesRegex(ValueError, "Unsafe fetch URL"):
+                fetch_json("https://metadata.example/api", allowed_hosts={"api-v2.soundcloud.com"})
         urlopen.assert_not_called()
 
     def test_restricted_fetch_rejects_redirects_outside_the_provider_allowlist(self) -> None:

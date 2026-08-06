@@ -12,10 +12,10 @@ Read and manage subscriptions in NetNewsWire. This project does not store articl
 
 ```mermaid
 flowchart LR
-    A["Public sources\nblogs, podcasts, YouTube, music"] --> B{"Useful native RSS?"}
-    B -->|"Yes"| C["Direct RSS or Atom\nreader fetches publisher"]
-    B -->|"No"| D["Small generated-feed adapter\npublic source only"]
-    D --> E["Optional HTTPS bridge\nscheduled and cached"]
+    A["Public sources\nblogs, podcasts, YouTube, music"] --> B{"Does it already\npublish a real feed?"}
+    B -->|"Yes"| C["Use that feed directly\nno extra setup"]
+    B -->|"No"| D["This tool builds one\nworks on this Mac now"]
+    D --> E["Optional: host it in the cloud\nso it works on every device"]
     C --> F["Private source registry"]
     E --> F
     F --> G["OPML export"]
@@ -54,7 +54,7 @@ It makes public network requests to validate the five direct feeds and generate 
 | Add one native feed without this tool | [GUI workflow](docs/setup.md#gui-first-workflow-no-terminal) | NetNewsWire |
 | Keep a portable source registry yourself | [Terminal workflow](docs/setup.md#terminal-workflow) | Git and Python 3.9+ |
 | Set up or migrate with a local coding agent | [Agent-assisted workflow](docs/agent-assisted-setup.md) | A local clone and a coding harness |
-| Import subscriptions from platforms | [Collect sources](docs/source-collection.md) | An OPML file, a supported export, or public URLs |
+| Import subscriptions from platforms | [What goes in `imports/`](imports/README.md) | An OPML file, a supported export, or public URLs |
 | Add Bandcamp, NTS, Mixcloud, or a supported webpage recipe | [Generated feeds](docs/source-types.md#generated-rss) | Terminal or local coding agent; optional HTTPS host |
 
 Start with NetNewsWire's [download page](https://netnewswire.com/). Choose `On My Mac` for a single-Mac trial or an isolated migration. Choose `iCloud` only when you are ready to sync subscriptions and reading state between Apple devices. NetNewsWire’s [getting-started guide](https://netnewswire.com/help/mac/6.1/en/getting-started.html) explains both account choices.
@@ -84,11 +84,15 @@ PYTHONPATH=src python3 -m netnewswire_feed_booster \
 
 Review the candidate before importing it back into NetNewsWire. The full, visual walkthrough is in [Setup](docs/setup.md).
 
-## Direct Versus Generated Feeds
+## How Feeds Actually Work Here
 
-Keep native HTTPS RSS, Atom, and JSON feeds direct. They are more reliable, respect the publisher’s intended delivery, and use no bridge resources. This includes publisher feeds, podcasts, Substack publications, and official YouTube channel feeds.
+Most of what you'll add — podcasts, Substack newsletters, YouTube channels, SoundCloud profiles — already publishes its own real RSS feed. NetNewsWire reads that feed straight from the publisher, on its own schedule, on every device you use. This tool never touches the content in between. When a real feed like this exists, it's always what gets used.
 
-Use a generated feed only for a public source without a useful native feed, such as a Bandcamp page, NTS show, public Mixcloud profile, or a page covered by a reviewed webpage recipe. Generated sources are optional; they need a local command or coding agent, and NetNewsWire may need an HTTPS bridge rather than a `file://` URL. See [Source Types](docs/source-types.md) and [Hosted Bridge](docs/hosting.md).
+A few platforms never publish a real feed at all — Bandcamp is the main one, along with NTS and Mixcloud. For those, this tool builds one for you: it reads the public page and writes a small RSS file. That file works immediately, for free, with no extra setup — NetNewsWire can read it right away. The catch is that a file on your Mac only exists on your Mac. It won't show up in NetNewsWire on your iPhone, and it won't update itself; you have to re-run the tool to refresh it.
+
+If you want one of those generated feeds to update on its own and reach your other devices — the way a real feed does — the file needs to live somewhere with a public web address instead of just on your hard drive. That's what the **hosted bridge** is: the same feed-building logic, running continuously on a small cloud service (this project uses [Modal](docs/hosting.md)) instead of your Mac, refreshing itself on a schedule and serving a normal `https://` URL that any device can reach. It's entirely optional, costs a small amount if you turn it on, and you don't need it at all if you only ever read on one Mac.
+
+See [Source Types](docs/source-types.md) for exactly which platforms fall into each category, and [Hosted Bridge](docs/hosting.md) if you decide you want the cloud option.
 
 ## Privacy Boundary
 
@@ -118,6 +122,7 @@ See [Public Release](docs/public-release.md) for the full release checklist.
 
 ## Documentation
 
+- [What Goes In `imports/`](imports/README.md): per-source table of what to save, where, and the exact command to run — start here if you have a file (or a URL) and just want to know what to do with it.
 - [Setup](docs/setup.md): visual first-run guide for GUI, terminal, and iCloud/On My Mac choices.
 - [First Import](docs/first-feed.md): public starter report, one-feed fallback, import success check, troubleshooting, and FAQ.
 - [Collect Sources](docs/source-collection.md): existing OPML, YouTube exports and URLs, Bandcamp, podcasts, Substack, and supported input formats.
@@ -126,6 +131,7 @@ See [Public Release](docs/public-release.md) for the full release checklist.
 - [Source Types](docs/source-types.md): direct feeds versus generated RSS.
 - [Slow Reading And Refresh Policy](docs/reading-practice.md): cadence, capacity, storage, and tuning tradeoffs.
 - [Writing A Source Adapter](docs/writing-a-source-adapter.md): security and testing contract for a new generated source type.
+- [Writing A Direct Feed Source](docs/writing-a-direct-feed-source.md): the equivalent contract for a source with its own native feed URL — YouTube, SoundCloud, Substack, Podcasts.
 - [Hosted Bridge](docs/hosting.md): tokenized generated feeds and supported host options.
 - [Contributing](CONTRIBUTING.md): scope and privacy requirements for contributors.
 

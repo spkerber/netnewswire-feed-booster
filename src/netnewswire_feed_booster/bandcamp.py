@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import re
-import urllib.request
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -13,11 +12,13 @@ from typing import Callable, List
 from urllib.parse import urljoin
 
 from .feed_store import Source, source_id_from_title
+from .http_client import fetch_json_post
 from .rss_safety import html_text, image_html
 
 
 BANDCAMP_COLLECTION_API_URL = "https://bandcamp.com/api/fancollection/1/collection_items"
 BANDCAMP_USER_AGENT = "netnewswire-feed-booster/0.1"
+BANDCAMP_API_HOSTS = frozenset({"bandcamp.com"})
 
 
 @dataclass
@@ -100,24 +101,11 @@ def extract_bandcamp_collection_pagination(html: str) -> BandcampCollectionPagin
 
 
 def post_bandcamp_collection_page(fan_id: int, older_than_token: str, count: int) -> dict:
-    payload = json.dumps(
-        {
-            "fan_id": fan_id,
-            "older_than_token": older_than_token,
-            "count": count,
-        }
-    ).encode("utf-8")
-    request = urllib.request.Request(
+    return fetch_json_post(
         BANDCAMP_COLLECTION_API_URL,
-        data=payload,
-        headers={
-            "Content-Type": "application/json",
-            "User-Agent": BANDCAMP_USER_AGENT,
-        },
-        method="POST",
+        {"fan_id": fan_id, "older_than_token": older_than_token, "count": count},
+        allowed_hosts=BANDCAMP_API_HOSTS,
     )
-    with urllib.request.urlopen(request, timeout=30) as response:
-        return json.loads(response.read().decode("utf-8"))
 
 
 def _parse_bandcamp_collection_items(raw_items: object) -> List[BandcampCollectionItem]:

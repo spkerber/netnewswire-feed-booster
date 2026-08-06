@@ -12,7 +12,7 @@ class RssSafetyTests(unittest.TestCase):
         headers["ETag"] = '"current"'
         error = HTTPError("https://example.com/feed.xml", 304, "Not Modified", headers, None)
 
-        with unittest.mock.patch("urllib.request.urlopen", side_effect=error) as urlopen:
+        with unittest.mock.patch("urllib.request.OpenerDirector.open", side_effect=error) as urlopen:
             response = fetch_text_response(
                 "https://example.com/feed.xml",
                 request_headers={"If-None-Match": '"previous"'},
@@ -83,7 +83,7 @@ class RssSafetyTests(unittest.TestCase):
             def read(self, _size):
                 return b"x" * 6
 
-        with unittest.mock.patch("urllib.request.urlopen", return_value=Response()):
+        with unittest.mock.patch("urllib.request.OpenerDirector.open", return_value=Response()):
             with self.assertRaises(ValueError):
                 fetch_text("https://example.com/feed.xml", max_bytes=5)
 

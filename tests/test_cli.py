@@ -760,7 +760,7 @@ class CliTests(unittest.TestCase):
 
             rendered = out_path.read_text(encoding="utf-8")
 
-        self.assertIn("https://example.modal.run/feeds/secret-token/bandcamp/bandcamp-fixture-artist.rss", rendered)
+        self.assertIn("https://example.modal.run/feeds/secret-token/generated/bandcamp-fixture-artist.rss", rendered)
         self.assertIn('htmlUrl="https://fixture-artist.bandcamp.com/"', rendered)
 
     def test_export_opml_requires_token_with_hosted_base(self) -> None:
@@ -882,7 +882,7 @@ class CliTests(unittest.TestCase):
                 Source(
                     id="bandcamp-old-file",
                     title="Bandcamp: Old File",
-                    feed_url=f"{Path(tmp_dir, 'exports/bandcamp/bandcamp-old-file.rss').resolve().as_uri()}",
+                    feed_url=f"{Path(tmp_dir, 'exports/generated/bandcamp-old-file.rss').resolve().as_uri()}",
                     kind="bandcamp",
                     profiles=["test-user"],
                 ),
@@ -930,7 +930,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(result, 1)
         self.assertIn("missing: 1", rendered)
         self.assertIn("unexpected: 1", rendered)
-        self.assertIn("stale_file_bandcamp: 1", rendered)
+        self.assertIn("stale_file_generated: 1", rendered)
         self.assertIn("tokenless_modal: 1", rendered)
         self.assertIn("unsubscribed: 1", rendered)
 
@@ -1302,6 +1302,202 @@ class CliTests(unittest.TestCase):
         self.assertEqual(nts_rss, "<rss>nts</rss>")
         self.assertEqual(webpage_rss, "<rss>webpage</rss>")
         self.assertTrue(refreshed.source_by_id("nts-example").feed_url.endswith("/generated/nts-example.rss"))
+
+    def test_refresh_generated_local_feeds_paces_requests_and_saves_incrementally(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            data_path = Path(tmp_dir) / "sources.json"
+            out_dir = Path(tmp_dir) / "generated"
+            store = FeedStore(data_path)
+            for index in range(1, 4):
+                store.add_or_update(
+                    Source(
+                        id=f"nts-fixture-{index}",
+                        title=f"NTS: Fixture {index}",
+                        feed_url=f"file:///old/nts-fixture-{index}.rss",
+                        site_url=f"https://www.nts.live/shows/fixture-{index}",
+                        kind="other",
+                        profiles=["trial"],
+                        groups=["NTS"],
+                        source="nts-local-generated",
+                    )
+                )
+            store.save()
+
+            class FakeAdapter:
+                hosted_route = "generated"
+                allowed_hosts = set()
+                allowed_suffixes = set()
+
+                def validate(self, _source):
+                    return None
+
+                def upstream_url(self, source):
+                    return source.site_url
+
+                def render(self, source, _content):
+                    return f"<rss>{source.id}</rss>"
+
+                def allowed_hosts_for(self, _source):
+                    return self.allowed_hosts
+
+                def allowed_suffixes_for(self, _source):
+                    return self.allowed_suffixes
+
+            with patch("netnewswire_feed_booster.cli.adapter_for_source", return_value=FakeAdapter()):
+                with patch("netnewswire_feed_booster.cli.fetch_text", return_value="source content"):
+                    with patch("netnewswire_feed_booster.cli.time.sleep") as sleep_mock:
+                        with redirect_stdout(io.StringIO()) as output:
+                            result = main(
+                                [
+                                    "--data",
+                                    str(data_path),
+                                    "refresh-generated-local-feeds",
+                                    "--profile",
+                                    "trial",
+                                    "--out-dir",
+                                    str(out_dir),
+                                    "--save-every",
+                                    "2",
+                                ]
+                            )
+
+            refreshed = FeedStore(data_path)
+            rendered = output.getvalue()
+            rss_files_exist = [(out_dir / f"nts-fixture-{index}.rss").exists() for index in range(1, 4)]
+
+        self.assertEqual(result, 0)
+        self.assertEqual(sleep_mock.call_count, 3)
+        sleep_mock.assert_called_with(1.0)
+        self.assertIn("...progress saved", rendered)
+        self.assertTrue(all(rss_files_exist))
+        for index in range(1, 4):
+            self.assertEqual(refreshed.source_by_id(f"nts-fixture-{index}").feed_url, (out_dir / f"nts-fixture-{index}.rss").resolve().as_uri())
+
+    def test_import_youtube_channel_url_rejects_a_non_youtube_host_before_network_io(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            data_path = Path(tmp_dir) / "sources.json"
+
+            with patch("urllib.request.urlopen") as urlopen:
+                with self.assertRaisesRegex(ValueError, "Unsafe fetch URL"):
+                    main(
+                        [
+                            "--data",
+                            str(data_path),
+                            "import-youtube-channel-url",
+                            "https://metadata.example/@fixture-channel",
+                        ]
+                    )
+            urlopen.assert_not_called()
+
+    def test_import_substack_profile_rejects_a_non_substack_host_before_network_io(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            data_path = Path(tmp_dir) / "sources.json"
+
+            with patch("urllib.request.urlopen") as urlopen:
+                with self.assertRaisesRegex(ValueError, "Unsafe fetch URL"):
+                    main(
+                        [
+                            "--data",
+                            str(data_path),
+                            "import-substack-profile",
+                            "https://metadata.example/@fixture-reader",
+                        ]
+                    )
+            urlopen.assert_not_called()
+
+    def test_refresh_bandcamp_local_feeds_paces_requests_and_saves_incrementally(self) -> None:
+        artist_html = '''
+        <meta property="og:site_name" content="Fixture Artist">
+        <ol id="music-grid" data-client-items="[{&quot;art_id&quot;:1,&quot;artist&quot;:&quot;Fixture Artist&quot;,&quot;page_url&quot;:&quot;/album/fixture-record&quot;,&quot;title&quot;:&quot;Fixture Record&quot;,&quot;type&quot;:&quot;album&quot;}]"></ol>
+        '''
+        with TemporaryDirectory() as tmp_dir:
+            data_path = Path(tmp_dir) / "sources.json"
+            out_dir = Path(tmp_dir) / "generated"
+            store = FeedStore(data_path)
+            for index in range(1, 4):
+                store.add_or_update(
+                    Source(
+                        id=f"bandcamp-fixture-{index}",
+                        title=f"Bandcamp: Fixture {index}",
+                        feed_url=f"file:///old/bandcamp-fixture-{index}.rss",
+                        site_url=f"https://fixture-{index}.bandcamp.com",
+                        kind="bandcamp",
+                        profiles=["test-user"],
+                        groups=["Bandcamp"],
+                    )
+                )
+            store.save()
+
+            with patch("netnewswire_feed_booster.cli.fetch_text", return_value=artist_html):
+                with patch("netnewswire_feed_booster.cli.time.sleep") as sleep_mock:
+                    with redirect_stdout(io.StringIO()) as output:
+                        result = main(
+                            [
+                                "--data",
+                                str(data_path),
+                                "refresh-bandcamp-local-feeds",
+                                "--profile",
+                                "test-user",
+                                "--out-dir",
+                                str(out_dir),
+                                "--save-every",
+                                "2",
+                            ]
+                        )
+
+            refreshed = FeedStore(data_path)
+            rendered = output.getvalue()
+            rss_files_exist = [(out_dir / f"bandcamp-fixture-{index}.rss").exists() for index in range(1, 4)]
+            refreshed_sources = [refreshed.source_by_id(f"bandcamp-fixture-{index}") for index in range(1, 4)]
+
+        self.assertEqual(result, 0)
+        self.assertEqual(sleep_mock.call_count, 3)
+        sleep_mock.assert_called_with(1.0)
+        self.assertIn("...progress saved", rendered)
+        self.assertTrue(all(rss_files_exist))
+        for source in refreshed_sources:
+            self.assertEqual(source.source, "bandcamp-local-generated")
+
+    def test_refresh_bandcamp_local_feeds_pause_seconds_zero_skips_sleep(self) -> None:
+        artist_html = '''
+        <meta property="og:site_name" content="Fixture Artist">
+        <ol id="music-grid" data-client-items="[{&quot;art_id&quot;:1,&quot;artist&quot;:&quot;Fixture Artist&quot;,&quot;page_url&quot;:&quot;/album/fixture-record&quot;,&quot;title&quot;:&quot;Fixture Record&quot;,&quot;type&quot;:&quot;album&quot;}]"></ol>
+        '''
+        with TemporaryDirectory() as tmp_dir:
+            data_path = Path(tmp_dir) / "sources.json"
+            out_dir = Path(tmp_dir) / "generated"
+            store = FeedStore(data_path)
+            store.add_or_update(
+                Source(
+                    id="bandcamp-fixture-1",
+                    title="Bandcamp: Fixture 1",
+                    feed_url="file:///old/bandcamp-fixture-1.rss",
+                    site_url="https://fixture-1.bandcamp.com",
+                    kind="bandcamp",
+                    profiles=["test-user"],
+                    groups=["Bandcamp"],
+                )
+            )
+            store.save()
+
+            with patch("netnewswire_feed_booster.cli.fetch_text", return_value=artist_html):
+                with patch("netnewswire_feed_booster.cli.time.sleep") as sleep_mock:
+                    with redirect_stdout(io.StringIO()):
+                        main(
+                            [
+                                "--data",
+                                str(data_path),
+                                "refresh-bandcamp-local-feeds",
+                                "--profile",
+                                "test-user",
+                                "--out-dir",
+                                str(out_dir),
+                                "--pause-seconds",
+                                "0",
+                            ]
+                        )
+
+        sleep_mock.assert_not_called()
 
 
 if __name__ == "__main__":

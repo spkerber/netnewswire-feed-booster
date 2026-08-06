@@ -18,14 +18,6 @@ from .generated_adapters import hosted_route_for_source
 FetchText = Callable[[str], str]
 
 
-def hosted_bandcamp_feed_url(base_url: str, source_id: str, token: str = "") -> str:
-    base = base_url.rstrip("/")
-    token = token.strip("/")
-    if not token:
-        raise ValueError("Hosted Bandcamp feed URLs require a token path segment")
-    return f"{base}/feeds/{token}/bandcamp/{source_id}.rss"
-
-
 def hosted_generated_feed_url(base_url: str, source_id: str, token: str = "") -> str:
     base = base_url.rstrip("/")
     token = token.strip("/")
@@ -34,13 +26,11 @@ def hosted_generated_feed_url(base_url: str, source_id: str, token: str = "") ->
     return f"{base}/feeds/{token}/generated/{source_id}.rss"
 
 
-def sources_with_hosted_bandcamp_feeds(sources: Iterable[Source], base_url: str, token: str = "") -> List[Source]:
+def sources_with_hosted_generated_feeds(sources: Iterable[Source], base_url: str, token: str = "") -> List[Source]:
+    """Rewrite every recognized generated source (Bandcamp included) to its hosted URL."""
     rewritten: List[Source] = []
     for source in sources:
-        hosted_route = hosted_route_for_source(source)
-        if hosted_route == "bandcamp":
-            rewritten.append(replace(source, feed_url=hosted_bandcamp_feed_url(base_url, source.id, token=token)))
-        elif hosted_route == "generated":
+        if hosted_route_for_source(source) == "generated":
             rewritten.append(replace(source, feed_url=hosted_generated_feed_url(base_url, source.id, token=token)))
         else:
             rewritten.append(source)

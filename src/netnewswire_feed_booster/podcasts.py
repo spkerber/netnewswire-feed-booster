@@ -48,7 +48,7 @@ def resolve_apple_podcast_feed(url: str) -> tuple[str, str]:
         return openrss_feed_url(parsed.netloc + parsed.path), title_from_url(url)
 
     lookup_url = "https://itunes.apple.com/lookup?id={}&entity=podcast".format(match.group(1))
-    payload = json.loads(fetch_text(lookup_url))
+    payload = json.loads(fetch_text(lookup_url, allowed_hosts={"itunes.apple.com"}))
     result = payload.get("results", [{}])[0] if payload.get("results") else {}
     feed_url = result.get("feedUrl")
     title = result.get("collectionName") or title_from_url(url)
@@ -59,6 +59,8 @@ def resolve_apple_podcast_feed(url: str) -> tuple[str, str]:
 
 
 def fetch_feed_title(feed_url: str) -> str:
+    # Deliberately unrestricted: "podcast" means any publisher's direct RSS URL,
+    # so there is no fixed host set to allowlist here.
     try:
         text = fetch_text(feed_url)
         root = ET.fromstring(text)

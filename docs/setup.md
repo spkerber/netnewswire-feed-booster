@@ -28,6 +28,18 @@ flowchart TD
     E --> F["Choose GUI, terminal, or agent path"]
 ```
 
+## What Happens When You Add Each Kind Of Source
+
+Before you start adding your own subscriptions, it helps to know which of these two things is going to happen — because it's different per platform, and it changes what "done" looks like.
+
+| You add... | What you get | Extra step for other devices? |
+| --- | --- | --- |
+| A podcast, Substack, YouTube channel, or SoundCloud account | The publisher's own real feed | No — works everywhere immediately, same as any RSS feed |
+| A Bandcamp artist, label, or fan page | A feed this tool builds from the page, saved on your Mac | Yes — only readable on this Mac until you deploy the [hosted bridge](hosting.md) |
+| An NTS show or Mixcloud profile | Same as Bandcamp: a feed built and saved locally | Yes — same hosted bridge step |
+
+If you're only ever reading in NetNewsWire on this one Mac, the "extra step" doesn't matter — everything already works. It only matters once you want the same subscriptions on your iPhone or iPad too. See [How Feeds Actually Work Here](../README.md#how-feeds-actually-work-here) for why the split exists, and [Hosted Bridge](hosting.md) when you're ready to take that step.
+
 ## GUI-First Workflow (No Terminal)
 
 Use this path when you only need native feeds and want NetNewsWire to handle the whole workflow. To exercise Feed Booster without typing commands, download the repository and double-click `Build Starter Import.command` as described in [First Import](first-feed.md).
@@ -56,11 +68,13 @@ Keep personal files outside a public clone or in the clone’s ignored directori
 
 ```text
 my-rss-stack/
-  imports/                 # private OPML and platform exports
+  imports/                 # private OPML and platform exports — see imports/README.md
   exports/                 # private candidate OPML and generated RSS
   data/sources.me.json     # private registry
   data/private.env         # private host configuration and token
 ```
+
+Open [`imports/README.md`](../imports/README.md) for a per-source table of what to save, where, and the exact command to run afterward — it covers every source this tool supports, including the ones that need no file at all.
 
 Finder can show hidden files with `Command-Shift-.` if you need to verify `.gitignore`, but do not drag a `.env`, OPML export, or profile JSON into GitHub or a public chat.
 

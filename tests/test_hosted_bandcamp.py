@@ -2,10 +2,9 @@ import unittest
 
 from netnewswire_feed_booster.feed_store import Source
 from netnewswire_feed_booster.hosted_bandcamp import (
-    hosted_bandcamp_feed_url,
     hosted_generated_feed_url,
     render_bandcamp_source_rss,
-    sources_with_hosted_bandcamp_feeds,
+    sources_with_hosted_generated_feeds,
 )
 
 
@@ -15,16 +14,6 @@ BANDCAMP_ARTIST_MUSIC_HTML = '''
 
 
 class HostedBandcampTests(unittest.TestCase):
-    def test_hosted_bandcamp_feed_url(self) -> None:
-        self.assertEqual(
-            hosted_bandcamp_feed_url("https://example.modal.run/", "bandcamp-fixture-artist", token="secret-token"),
-            "https://example.modal.run/feeds/secret-token/bandcamp/bandcamp-fixture-artist.rss",
-        )
-
-    def test_hosted_bandcamp_feed_url_requires_token(self) -> None:
-        with self.assertRaisesRegex(ValueError, "require a token"):
-            hosted_bandcamp_feed_url("https://example.modal.run/", "bandcamp-fixture-artist")
-
     def test_hosted_generated_feed_url(self) -> None:
         self.assertEqual(
             hosted_generated_feed_url("https://example.modal.run/", "nts-fixture-signal", token="secret-token"),
@@ -35,7 +24,7 @@ class HostedBandcampTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "require a token"):
             hosted_generated_feed_url("https://example.modal.run/", "nts-fixture-signal")
 
-    def test_sources_with_hosted_bandcamp_feeds_rewrites_only_bandcamp(self) -> None:
+    def test_sources_with_hosted_generated_feeds_rewrites_only_recognized_sources(self) -> None:
         sources = [
             Source(
                 id="bandcamp-fixture-artist",
@@ -60,11 +49,12 @@ class HostedBandcampTests(unittest.TestCase):
             ),
         ]
 
-        rewritten = sources_with_hosted_bandcamp_feeds(sources, "https://example.modal.run", token="secret-token")
+        rewritten = sources_with_hosted_generated_feeds(sources, "https://example.modal.run", token="secret-token")
 
+        # Bandcamp and NTS both land on the same shared /generated/ route now.
         self.assertEqual(
             rewritten[0].feed_url,
-            "https://example.modal.run/feeds/secret-token/bandcamp/bandcamp-fixture-artist.rss",
+            "https://example.modal.run/feeds/secret-token/generated/bandcamp-fixture-artist.rss",
         )
         self.assertEqual(rewritten[0].site_url, "https://fixture-artist.bandcamp.com/")
         self.assertEqual(rewritten[1].feed_url, "https://example.com/feed")
