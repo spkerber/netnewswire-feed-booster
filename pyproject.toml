@@ -8,6 +8,9 @@ version = "0.1.0"
 description = "Local-first RSS source manager for NetNewsWire OPML workflows."
 license = {text = "MIT"}
 requires-python = ">=3.9"
+# The tool runs on the standard library alone. Keep this empty; the hosted
+# bridge's packages belong in the modal extra below.
+dependencies = []
 
 [project.optional-dependencies]
 modal = [

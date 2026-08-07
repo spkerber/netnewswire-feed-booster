@@ -59,6 +59,36 @@ It makes public network requests to validate the five direct feeds and generate 
 
 Start with NetNewsWire's [download page](https://netnewswire.com/). Choose `On My Mac` for a single-Mac trial or an isolated migration. Choose `iCloud` only when you are ready to sync subscriptions and reading state between Apple devices. NetNewsWire’s [getting-started guide](https://netnewswire.com/help/mac/6.1/en/getting-started.html) explains both account choices.
 
+## Requirements
+
+Python 3.9 or later, and nothing else. The tool runs on the standard library, so there is no `pip install` step, no lockfile, and no virtual environment to manage. Clone it and it works.
+
+| What you're doing | What you need |
+| --- | --- |
+| Starter import, registry, OPML export, generated feeds | Python 3.9+ |
+| Double-clicking `Build Starter Import.command` | macOS with Finder |
+| `git clone` and the `make` shortcuts | Git, GNU Make, and Bash |
+| Hosting generated feeds so they refresh on their own | The optional `modal` extra, below |
+| `scripts/verify_public_template.sh` before publishing a clone | [ripgrep](https://github.com/BurntSushi/ripgrep) (`rg`) |
+
+The test suite runs on Python 3.9 and 3.13 on Linux and on Python 3.13 on macOS. Anything in that range behaves the same.
+
+### Optional: The Hosted Bridge
+
+One file needs third-party packages: `modal_bandcamp_app.py`, and only when you run the [hosted bridge](docs/hosting.md). `pyproject.toml` declares them as the `modal` extra.
+
+| Package | Minimum | What it does |
+| --- | --- | --- |
+| `modal` | 1.5.3 | Runs the bridge and its refresh schedule |
+| `fastapi[standard]` | 0.115.8 | Serves the feed endpoints |
+
+Install them into their own virtual environment so the tool itself stays dependency-free:
+
+```bash
+python3 -m venv .venv-modal
+.venv-modal/bin/python -m pip install -e ".[modal]"
+```
+
 ## Fast Start: Terminal
 
 ```bash

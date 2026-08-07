@@ -9,6 +9,18 @@ NetNewsWire-Feed-Booster is an independent companion tool. It is not a fork of N
 - A privacy, portability, or accessibility improvement.
 - Documentation that makes the local-first setup easier to understand.
 
+## Development requirements
+
+Python 3.9 or later. The tool and its tests use the standard library, so there is nothing to install before running:
+
+```bash
+make test
+```
+
+CI runs that suite on Python 3.9 and 3.13 on Linux and on Python 3.13 on macOS. `pyproject.toml` sets the floor at 3.9, so avoid syntax newer than that — a `match` statement or a PEP 604 `int | None` union evaluated at runtime will pass locally on a current Python and break the 3.9 job. Modules that annotate anything start with `from __future__ import annotations`, which defers annotations and keeps modern typing syntax legal on 3.9.
+
+Two things need more than Python. `scripts/verify_public_template.sh` uses [ripgrep](https://github.com/BurntSushi/ripgrep) (`rg`) for its privacy checks. The hosted bridge needs the `modal` extra, installed into its own virtual environment as [Hosted Bridge](docs/hosting.md) describes.
+
 ## Before opening a pull request
 
 Open an issue first for a new source type or architecture change. Include the source's public URL shape, an example response saved without personal data, the expected feed behavior, and any rate-limit or terms-of-use concerns.
