@@ -13,6 +13,7 @@ from .http_client import fetch_json, fetch_text
 # fetch somewhere unexpected — the same posture every GeneratedAdapter already has.
 SOUNDCLOUD_PAGE_HOSTS = frozenset({"soundcloud.com", "www.soundcloud.com"})
 SOUNDCLOUD_API_HOSTS = frozenset({"api-v2.soundcloud.com"})
+MAX_FOLLOWING_PAGES = 500  # backstop: ~100,000 accounts at the API's own limit=200 per page
 
 
 def _default_page_fetcher(url: str) -> str:
@@ -37,8 +38,17 @@ def fetch_soundcloud_following_sources(
     sources: list[Source] = []
     seen_feed_urls: set[str] = set()
     next_url = soundcloud_followings_api_url(user_id, client_id, app_version=app_version)
+    pages_fetched = 0
     while next_url:
+        if pages_fetched >= MAX_FOLLOWING_PAGES:
+            # Backstop only: termination otherwise depends entirely on this
+            # undocumented API eventually returning an empty/absent next_href. A
+            # misbehaving response (repeating the same next_href) would otherwise
+            # loop forever. 500 pages is far beyond any real following list.
+            print(f"WARNING\tSoundCloud following-list pagination stopped after {MAX_FOLLOWING_PAGES} pages; results may be incomplete")
+            break
         payload = json_fetcher(next_url)
+        pages_fetched += 1
         for user in payload.get("collection", []):
             source = soundcloud_user_source(user, profile=profile, group=group, source_label="soundcloud-following-import")
             if source and source.feed_url not in seen_feed_urls:

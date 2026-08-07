@@ -16,6 +16,7 @@ from netnewswire_feed_booster.soundcloud import (
     extract_soundcloud_api_client_id,
     extract_soundcloud_app_version,
     extract_soundcloud_user_id,
+    fetch_soundcloud_following_sources,
     fetch_soundcloud_profile_source,
     soundcloud_resolve_api_url,
     soundcloud_user_source,
@@ -354,6 +355,41 @@ class SourceImporterTests(unittest.TestCase):
         self.assertIn("url=https%3A%2F%2Fsoundcloud.com%2Fzorblax-quiver", url)
         self.assertIn("client_id=client-123", url)
         self.assertIn("app_version=42", url)
+
+    def test_fetch_soundcloud_following_sources_stops_at_the_page_cap_for_a_misbehaving_api(self) -> None:
+        # next_href never becomes empty and always points to "more" data,
+        # simulating a misbehaving or malicious API response. Termination must
+        # not depend entirely on the API eventually reporting completion.
+        call_count = 0
+
+        def fake_fetcher(url: str) -> str:
+            return SOUNDCLOUD_HTML
+
+        def fake_json_fetcher(url: str) -> dict:
+            nonlocal call_count
+            call_count += 1
+            return {
+                "collection": [
+                    {
+                        "id": call_count,
+                        "username": f"Fixture User {call_count}",
+                        "permalink_url": f"https://soundcloud.com/fixture-user-{call_count}",
+                    }
+                ],
+                "next_href": f"https://api-v2.soundcloud.com/users/51978385/followings?offset={call_count}",
+            }
+
+        from netnewswire_feed_booster.soundcloud import MAX_FOLLOWING_PAGES
+
+        sources = fetch_soundcloud_following_sources(
+            "https://soundcloud.com/zorblax-quiver",
+            profile="test-user",
+            fetcher=fake_fetcher,
+            json_fetcher=fake_json_fetcher,
+        )
+
+        self.assertEqual(call_count, MAX_FOLLOWING_PAGES)
+        self.assertEqual(len(sources), MAX_FOLLOWING_PAGES)
 
     def test_fetch_soundcloud_profile_source_resolves_single_profile(self) -> None:
         fetched_urls: list[str] = []
