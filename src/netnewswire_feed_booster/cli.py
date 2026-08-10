@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import argparse
+import io
 import os
 import sys
 import time
 from collections import Counter
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 from .bandcamp import (
     write_bandcamp_collection_rss,
 )
+from .batch_subscribe import BATCH_ADAPTER_COMMANDS, detect_batch_adapter, parse_batch_lines
 from .bandcamp_following import import_bandcamp_following
 from .bandcamp_sources import build_bandcamp_source_from_url
 from .subscription_history import SubscriptionHistoryStore, default_subscription_history_path
@@ -326,6 +329,69 @@ def build_parser() -> argparse.ArgumentParser:
     podcast_parser.add_argument("--group", default="")
     podcast_parser.add_argument("--private", action="store_true", help="Write to the local gitignored private source overlay")
 
+    batch_parser = subparsers.add_parser(
+        "batch-subscribe",
+        help="Subscribe to several mixed-type URLs in one run, from a file, standard input, or repeated --url flags",
+        description=(
+            "Subscribe to several public sources in one run.\n"
+            "\n"
+            "Each line of the batch file holds one URL. Blank lines, lines starting with\n"
+            '"#", and a trailing "#" comment are ignored. A line may end with\n'
+            "--adapter=<adapter> to force one adapter instead of the detected one:\n"
+            "\n"
+            "  # music\n"
+            "  https://artist.bandcamp.com/\n"
+            "  https://www.youtube.com/@example\n"
+            "  https://publisher.example/feed.xml  --adapter=podcast\n"
+            "\n"
+            "Detected automatically: bandcamp.com, youtube.com channel pages,\n"
+            "soundcloud.com, substack.com, mixcloud.com, nts.live show pages, and any page\n"
+            "already covered by a registered webpage recipe. Anything else goes through\n"
+            "public feed discovery, the same as subscribe-feed-url.\n"
+            "\n"
+            "Forceable with --adapter=:\n"
+            f"  {', '.join(sorted(BATCH_ADAPTER_COMMANDS))}\n"
+            "\n"
+            "Each URL is dispatched to the single-URL command it belongs to, so folder\n"
+            "defaults, duplicate checks, and host allowlists behave exactly as they do\n"
+            "when those commands are run by hand. --group applies to every URL in the\n"
+            "batch; omit it to let each adapter apply its own default folder per URL.\n"
+            "The registry is chosen by --profile and the top-level --data, as usual.\n"
+            "\n"
+            "URLs are processed in order, one at a time. A URL that fails is reported and\n"
+            "the run continues; the exit code is nonzero if any URL failed. A URL already\n"
+            "in the registry is skipped and does not count as a failure."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    batch_parser.add_argument(
+        "path",
+        type=Path,
+        nargs="?",
+        default=None,
+        help='Batch file of URLs, or "-" to read standard input. Omit when using --url.',
+    )
+    batch_parser.add_argument(
+        "--url",
+        action="append",
+        default=[],
+        help="One URL to subscribe. Repeatable, for a short batch without creating a file.",
+    )
+    batch_parser.add_argument("--profile", default=DEFAULT_PROFILE)
+    batch_parser.add_argument(
+        "--group",
+        default="",
+        help='Folder for every URL in the batch. Omit for each adapter\'s own default; pass "" for the OPML root.',
+    )
+    batch_parser.add_argument("--out-dir", type=Path, default=Path("exports/generated"))
+    batch_parser.add_argument(
+        "--pause-seconds",
+        type=float,
+        default=1.0,
+        help="Delay between URLs, so a large batch doesn't hammer these sites",
+    )
+    batch_parser.add_argument("--show-sensitive", action="store_true")
+
     status_parser = subparsers.add_parser("set-status", help="Set a source status")
     status_parser.add_argument("source_id")
     status_parser.add_argument("--status", required=True, choices=["active", "candidate", "paused", "unsubscribed"])
@@ -452,6 +518,39 @@ def _find_feed_identity_duplicate(
         if reason:
             return existing, reason, False
     return possible, "", possible is not None
+
+
+# Batch targets that write a generated RSS seed, and so accept --out-dir. The rest
+# take only the URL, --profile, and --group.
+BATCH_OUT_DIR_COMMANDS = frozenset(
+    {
+        "subscribe-bandcamp-source",
+        "subscribe-mixcloud-profile",
+        "subscribe-nts-show",
+        "subscribe-webpage-feed",
+    }
+)
+
+
+def _batch_registered_source(sources: list[Source], url: str) -> Optional[Source]:
+    """Find a source already standing for this URL, before spending a fetch on it.
+
+    Only an exact canonical match counts. The per-adapter commands still run their
+    own richer duplicate checks; this is the cheap pass that keeps a re-run of the
+    same batch file from refetching every page it already holds.
+    """
+
+    target = canonical_url(normalize_url(url))
+    if not target:
+        return None
+    return next(
+        (
+            source
+            for source in sources
+            if canonical_url(source.site_url) == target or canonical_url(source.feed_url) == target
+        ),
+        None,
+    )
 
 
 def _read_identity_source(url: str) -> str:
@@ -1071,6 +1170,117 @@ def main(argv: Optional[list[str]] = None) -> int:
         destination = "private overlay" if args.private else "profile registry"
         print(f"Subscribed podcast source {source_id} into the {destination}.")
         return 0
+
+    if args.command == "batch-subscribe":
+        if args.path is not None and args.url:
+            parser.error("Pass a batch file or --url flags, not both.")
+        if args.path is None and not args.url:
+            parser.error('Pass a batch file path, "-" for standard input, or at least one --url.')
+
+        try:
+            if args.url:
+                batch_lines = parse_batch_lines("\n".join(args.url))
+            elif str(args.path) == "-":
+                batch_lines = parse_batch_lines(sys.stdin.read())
+            else:
+                if not args.path.is_file():
+                    parser.error(f"Missing batch file: {args.path}")
+                batch_lines = parse_batch_lines(args.path.read_text(encoding="utf-8"))
+        except ValueError as error:
+            parser.error(str(error))
+
+        # An explicit --group applies to the whole batch. Without one, each URL is
+        # dispatched with no --group at all, so the target command's own
+        # _apply_default_group picks the folder for that adapter — which is the only
+        # way a mixed batch can land Bandcamp and YouTube in their own folders.
+        group_was_supplied = _option_was_supplied(normalized_argv, "--group")
+        succeeded: list[str] = []
+        batch_skipped: list[tuple[str, str]] = []
+        batch_failed: list[tuple[str, str]] = []
+
+        for line in batch_lines:
+            adapter = line.adapter or detect_batch_adapter(line.url)
+            command = BATCH_ADAPTER_COMMANDS[adapter]
+            before_sources = FeedStore(args.data).sources()
+
+            already_registered = _batch_registered_source(before_sources, line.url)
+            if already_registered is not None:
+                batch_skipped.append((line.url, f"already subscribed as {already_registered.id}"))
+                print(f"SKIPPED\t{line.url}\t{adapter}\t{already_registered.id}\talready subscribed")
+                continue
+
+            child_argv = [
+                "--data",
+                str(args.data),
+                "--private-data",
+                str(args.private_data),
+                "--history",
+                str(args.history),
+                command,
+                line.url,
+                "--profile",
+                args.profile,
+            ]
+            if group_was_supplied:
+                child_argv += ["--group", args.group]
+            if command in BATCH_OUT_DIR_COMMANDS:
+                child_argv += ["--out-dir", str(args.out_dir)]
+
+            # The target command owns the user-facing message for one URL; a batch
+            # needs one line per URL instead, so its output is captured and only
+            # surfaced when it explains a failure.
+            child_output = io.StringIO()
+            child_result = 0
+            child_error: Optional[BaseException] = None
+            try:
+                with redirect_stdout(child_output), redirect_stderr(child_output):
+                    child_result = main(child_argv)
+            except SystemExit as error:
+                child_result = int(error.code or 0)
+            except Exception as error:  # one bad URL must not end the batch
+                child_error = error
+
+            if child_error is not None:
+                detail = (
+                    f"{type(child_error).__name__}: {child_error}"
+                    if args.show_sensitive
+                    else f"{type(child_error).__name__}\t[details redacted; use --show-sensitive]"
+                )
+                batch_failed.append((line.url, detail))
+                print(f"FAILED\t{line.url}\t{adapter}\t{detail}")
+            elif child_result != 0:
+                reported = child_output.getvalue().strip().splitlines()
+                detail = reported[-1].strip() if reported else f"{command} exited {child_result}"
+                batch_failed.append((line.url, detail))
+                print(f"FAILED\t{line.url}\t{adapter}\t{detail}")
+            else:
+                after_sources = FeedStore(args.data).sources()
+                before_ids = {source.id for source in before_sources}
+                added = [source for source in after_sources if source.id not in before_ids]
+                if added:
+                    folders = " / ".join(added[0].groups) or "OPML root"
+                    succeeded.append(line.url)
+                    print(f"OK\t{line.url}\t{adapter}\t{added[0].id}\t{folders}")
+                else:
+                    # The command reported success without adding a row, so it
+                    # recognized the URL as one already held.
+                    existing = _batch_registered_source(after_sources, line.url)
+                    label = existing.id if existing is not None else "already present"
+                    batch_skipped.append((line.url, f"already subscribed as {label}"))
+                    print(f"SKIPPED\t{line.url}\t{adapter}\t{label}\talready subscribed")
+
+            if args.pause_seconds > 0:
+                time.sleep(args.pause_seconds)
+
+        print(
+            f"{len(batch_lines)} processed, {len(succeeded)} succeeded, "
+            f"{len(batch_skipped)} skipped, {len(batch_failed)} failed"
+        )
+        if batch_failed:
+            print("Re-run these after fixing them:")
+            for url, detail in batch_failed:
+                print(f"FAILED\t{url}\t{detail}")
+        return 1 if batch_failed else 0
 
     if args.command == "set-status":
         source = store.set_status(args.source_id, args.status)
