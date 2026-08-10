@@ -27,6 +27,7 @@ flowchart TD
 | NTS | Public show page | `https://www.nts.live/shows/example` | Generated RSS; optional HTTPS bridge |
 | SoundCloud, one profile | Public profile URL | `https://soundcloud.com/example` | Resolves the account and its official profile feed |
 | SoundCloud, many profiles | Public profile URL you follow from | `https://soundcloud.com/example` | Official profile feeds for everyone that account follows |
+| Several sources of mixed types | Text file of URLs, one per line | `imports/new-sources.txt` | Routes each URL to its own source command in one run |
 
 Do not upload or commit tokens, paid newsletters, private podcast URLs, cookies, account exports beyond what you need locally, or a copy of a platform page obtained while signed in.
 
@@ -239,6 +240,82 @@ PYTHONPATH=src python3 -m netnewswire_feed_booster \
 ```
 
 The command discovers RSS, Atom, or JSON Feed metadata before writing. It blocks strong duplicates by normalized feed URL, canonical publication URL, or overlapping stable item IDs. It also blocks same-kind, same-title probable duplicates unless you explicitly pass `--allow-possible-duplicate`. Set `NETNEWSWIRE_OPML` in the ignored private environment file, or pass `--against-opml`, to include an existing NetNewsWire subscription export in the preflight. If the page exposes no feed, keep the public source URL in a private text file and consult [Writing A Source Adapter](writing-a-source-adapter.md) before proposing generated RSS.
+
+## Multiple Sources At Once
+
+Every command above takes one URL. When you have a handful of URLs of mixed types, `batch-subscribe` reads them from a file and routes each one to the command it would have gone to anyway. It adds no new subscribe behavior of its own: folder defaults, duplicate checks, and upstream host allowlists are the same as running each command by hand.
+
+Keep the list in your ignored `imports/` directory. One URL per line; blank lines, `#` comment lines, and a trailing `#` comment are ignored:
+
+```text
+# imports/new-sources.txt
+https://artist.bandcamp.com/
+https://www.youtube.com/@example
+https://soundcloud.com/example
+https://publication.substack.com/
+https://example.com/blog            # no native feed? discovery will say so
+https://publisher.example/feed.xml  --adapter=podcast
+```
+
+```bash
+PYTHONPATH=src python3 -m netnewswire_feed_booster \
+  --data "data/sources.${RSS_PROFILE}.json" \
+  batch-subscribe imports/new-sources.txt --profile "$RSS_PROFILE"
+```
+
+For a couple of URLs, skip the file with repeated `--url` flags, or pipe a list in with `-`:
+
+```bash
+PYTHONPATH=src python3 -m netnewswire_feed_booster \
+  --data "data/sources.${RSS_PROFILE}.json" \
+  batch-subscribe --url https://artist.bandcamp.com/ \
+  --url https://www.youtube.com/@example --profile "$RSS_PROFILE"
+```
+
+### What Each URL Is Detected As
+
+| URL shape | Goes to |
+| --- | --- |
+| `bandcamp.com` artist, label, or fan page | `subscribe-bandcamp-source` |
+| `youtube.com` channel page (`/@name`, `/channel/`, `/c/`, `/user/`) | `import-youtube-channel-url` |
+| `soundcloud.com` profile | `subscribe-soundcloud-profile` |
+| `substack.com` publication | `subscribe-substack` |
+| `mixcloud.com` profile | `subscribe-mixcloud-profile` |
+| `nts.live/shows/...` show page | `subscribe-nts-show` |
+| A page covered by a registered webpage recipe | `subscribe-webpage-feed` |
+| Anything else | `subscribe-feed-url` discovery |
+
+A recipe page is matched against the existing registered-recipe allowlist, not guessed at, so it keeps going through `subscribe-webpage-feed` rather than generic discovery. An arbitrary URL never becomes a recipe fetch target.
+
+### Forcing One Adapter
+
+End a line with `--adapter=<adapter>` when detection cannot know what you meant. A podcast feed is the common case: nothing in `https://publisher.example/feed.xml` says "podcast", so detection would treat it as a plain direct feed.
+
+```text
+https://publisher.example/feed.xml   --adapter=podcast
+https://store.example/               --adapter=bandcamp
+```
+
+Supported adapters are `bandcamp`, `feed-url`, `mixcloud`, `nts`, `podcast`, `soundcloud`, `substack`, `webpage`, and `youtube`. An unknown adapter stops the run before any network request, so a typo cannot half-import a list. `--adapter=bandcamp` is also how you reach a Bandcamp store on a custom domain, which has no `bandcamp.com` hostname to detect.
+
+### Reading The Result
+
+Each URL prints one line, then a summary:
+
+```text
+OK       https://artist.bandcamp.com/     bandcamp   bandcamp-artist    Bandcamp
+SKIPPED  https://www.youtube.com/@example youtube    example-channel    already subscribed
+FAILED   https://typo.example/            feed-url   URLError  [details redacted; use --show-sensitive]
+3 processed, 1 succeeded, 1 skipped, 1 failed
+Re-run these after fixing them:
+FAILED   https://typo.example/            URLError  [details redacted; use --show-sensitive]
+```
+
+A URL already in the registry is skipped rather than refetched, so re-running the same file is cheap and safe. One bad URL does not stop the rest of the list; failures are repeated at the end so you can fix them and re-run a shorter file. The exit code is nonzero if any URL failed and zero when the only non-successes were skips, which makes it usable in a script. Failure details follow the same rule as every other command here: pass `--show-sensitive` only for a local look, and do not paste that output.
+
+Requests run one at a time with a one-second pause between them (`--pause-seconds`). `--group` applies to every URL in the batch; omit it to let each type land in its own default folder, which is usually what you want for a mixed list.
+
+Generated sources in the batch write local RSS seeds exactly as the single-URL commands do. Deploying the hosted bridge remains a separate, deliberate step — see [Hosted Bridge](hosting.md).
 
 ## Generated Public Sources
 

@@ -20,8 +20,10 @@ jobs:
             python-version: "3.9"
           - os: ubuntu-latest
             python-version: "3.13"
+            verify-guards: true
           - os: macos-latest
             python-version: "3.13"
+            verify-guards: true
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -29,3 +31,8 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: PYTHONPATH=src python -m unittest discover -s tests
       - run: ./scripts/verify_public_template.sh
+      # Once per OS: the privacy guards shell out to grep, and BSD and GNU grep
+      # are where a platform-specific silent break would hide. The Python
+      # version is irrelevant to them, so the second Linux leg skips this.
+      - if: matrix.verify-guards
+        run: ./tests/verify_public_template_test.sh
