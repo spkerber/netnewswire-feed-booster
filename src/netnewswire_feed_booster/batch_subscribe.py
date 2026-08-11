@@ -12,6 +12,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
+from .webpage_recipes import webpage_recipe_for_url
+
 
 # Which single-URL subcommand each detected or forced adapter speaks to. Every
 # value here has to stay a real subparser name in cli.build_parser().
@@ -63,35 +65,40 @@ def parse_batch_lines(text: str) -> list[BatchLine]:
 
     lines: list[BatchLine] = []
     for line_number, raw_line in enumerate(text.splitlines(), start=1):
-        stripped = raw_line.strip()
-        if not stripped or stripped.startswith("#"):
+        tokens = _tokens_before_comment(raw_line)
+        if not tokens:
             continue
 
-        url = ""
+        url, *flags = tokens
         adapter = ""
-        for token in stripped.split():
-            if token.startswith("#"):
-                break
-            if not url:
-                url = token
-                continue
-            if token.startswith("--adapter="):
-                adapter = _validated_adapter(token.split("=", 1)[1], line_number)
-                continue
-            if token.startswith("--kind="):
+        for flag in flags:
+            if flag.startswith("--adapter="):
+                adapter = _validated_adapter(flag.split("=", 1)[1], line_number)
+            elif flag.startswith("--kind="):
                 raise ValueError(
                     f"Line {line_number}: use --adapter= rather than --kind=. "
                     "In this tool --kind names a source's own kind, which is a "
                     "different vocabulary; a batch line picks which adapter runs."
                 )
-            raise ValueError(
-                f"Line {line_number}: unsupported token {token!r}. A batch line "
-                "accepts one URL and an optional --adapter=<adapter> override."
-            )
+            else:
+                raise ValueError(
+                    f"Line {line_number}: unsupported token {flag!r}. A batch line "
+                    "accepts one URL and an optional --adapter=<adapter> override."
+                )
 
-        if url:
-            lines.append(BatchLine(url=url, adapter=adapter, line_number=line_number))
+        lines.append(BatchLine(url=url, adapter=adapter, line_number=line_number))
     return lines
+
+
+def _tokens_before_comment(raw_line: str) -> list[str]:
+    """Split one line into tokens, dropping a whole-line or trailing `#` comment."""
+
+    tokens = raw_line.strip().split()
+    comment_at = next(
+        (index for index, token in enumerate(tokens) if token.startswith("#")),
+        len(tokens),
+    )
+    return tokens[:comment_at]
 
 
 def _validated_adapter(adapter: str, line_number: int) -> str:
@@ -147,8 +154,6 @@ def detect_batch_adapter(url: str) -> str:
         return "mixcloud"
     if hostname in _NTS_HOSTS and path.startswith("/shows/"):
         return "nts"
-
-    from .webpage_recipes import webpage_recipe_for_url
 
     if webpage_recipe_for_url(url) is not None:
         return "webpage"

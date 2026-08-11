@@ -7,6 +7,7 @@ import sys
 import time
 from collections import Counter
 from contextlib import redirect_stderr, redirect_stdout
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
@@ -15,6 +16,7 @@ from .bandcamp import (
 )
 from .batch_subscribe import (
     BATCH_ADAPTER_COMMANDS,
+    BatchLine,
     detect_batch_adapter,
     known_url_problem,
     parse_batch_lines,
@@ -572,6 +574,119 @@ def _added_source_problem(source: Source) -> str:
 
     result = audit_source(source, fetcher=fetch_text)
     return "" if result.status == "ok" else result.detail
+
+
+@dataclass(frozen=True)
+class BatchOutcome:
+    """What happened to one batch URL: its status column, the columns after it,
+    and the one-line reason repeated in the closing summary."""
+
+    status: str
+    columns: tuple[str, ...]
+    reason: str = ""
+    # Whether an upstream request was made, and so whether to pace before the
+    # next URL. A URL rejected on shape, or already known, never reaches the network.
+    dispatched: bool = False
+
+
+def _redacted_detail(detail: str, show_sensitive: bool) -> str:
+    """Keep the exception or error name, drop the part that can carry a URL."""
+
+    if show_sensitive:
+        return detail
+    return f"{detail.split(':')[0]}\t[details redacted; use --show-sensitive]"
+
+
+def _already_subscribed_outcome(source_id: str, *, dispatched: bool = False) -> BatchOutcome:
+    return BatchOutcome(
+        "SKIPPED",
+        (source_id, "already subscribed"),
+        f"already subscribed as {source_id}",
+        dispatched=dispatched,
+    )
+
+
+def _subscribe_batch_line(
+    line: BatchLine,
+    adapter: str,
+    args: argparse.Namespace,
+    forwarded_group: Optional[str],
+) -> BatchOutcome:
+    """Subscribe one batch URL through the single-URL command it belongs to.
+
+    The target command owns the user-facing message for one URL; a batch wants one
+    line per URL instead, so that output is captured and only surfaced when it
+    explains a failure.
+    """
+
+    command = BATCH_ADAPTER_COMMANDS[adapter]
+
+    shape_problem = "" if line.adapter else known_url_problem(line.url)
+    if shape_problem:
+        return BatchOutcome("FAILED", (shape_problem,), shape_problem)
+
+    before_sources = FeedStore(args.data).sources()
+    already_registered = _batch_registered_source(before_sources, line.url)
+    if already_registered is not None:
+        return _already_subscribed_outcome(already_registered.id)
+
+    child_argv = [
+        "--data",
+        str(args.data),
+        "--private-data",
+        str(args.private_data),
+        "--history",
+        str(args.history),
+        command,
+        line.url,
+        "--profile",
+        args.profile,
+    ]
+    if forwarded_group is not None:
+        child_argv += ["--group", forwarded_group]
+    if command in BATCH_OUT_DIR_COMMANDS:
+        child_argv += ["--out-dir", str(args.out_dir)]
+
+    child_output = io.StringIO()
+    try:
+        with redirect_stdout(child_output), redirect_stderr(child_output):
+            child_result = main(child_argv)
+    except SystemExit as error:
+        child_result = int(error.code or 0)
+    except Exception as error:  # one bad URL must not end the batch
+        detail = _redacted_detail(f"{type(error).__name__}: {error}", args.show_sensitive)
+        return BatchOutcome("FAILED", (detail,), detail, dispatched=True)
+
+    if child_result != 0:
+        reported = child_output.getvalue().strip().splitlines()
+        detail = reported[-1].strip() if reported else f"{command} exited {child_result}"
+        return BatchOutcome("FAILED", (detail,), detail, dispatched=True)
+
+    before_ids = {source.id for source in before_sources}
+    after_sources = FeedStore(args.data).sources()
+    added = next((source for source in after_sources if source.id not in before_ids), None)
+    if added is None:
+        # The command reported success without adding a row, so it recognized the
+        # URL as one already held.
+        existing = _batch_registered_source(after_sources, line.url)
+        return _already_subscribed_outcome(
+            existing.id if existing is not None else "already present", dispatched=True
+        )
+
+    feed_problem = "" if args.no_verify else _added_source_problem(added)
+    if feed_problem:
+        # Keep the row for the record, but out of active exports.
+        demoted = FeedStore(args.data)
+        demoted.set_status(added.id, "candidate")
+        demoted.save()
+        reason = (
+            "added but its feed did not validate; set to candidate: "
+            + _redacted_detail(feed_problem, args.show_sensitive)
+        )
+        return BatchOutcome("FAILED", (reason,), reason, dispatched=True)
+
+    folders = " / ".join(added.groups) or "OPML root"
+    return BatchOutcome("OK", (added.id, folders), dispatched=True)
 
 
 def _batch_registered_source(sources: list[Source], url: str) -> Optional[Source]:
@@ -1248,116 +1363,26 @@ def main(argv: Optional[list[str]] = None) -> int:
         # dispatched with no --group at all, so the target command's own
         # _apply_default_group picks the folder for that adapter — which is the only
         # way a mixed batch can land Bandcamp and YouTube in their own folders.
-        group_was_supplied = _option_was_supplied(normalized_argv, "--group")
-        succeeded: list[str] = []
-        batch_skipped: list[tuple[str, str]] = []
-        batch_failed: list[tuple[str, str]] = []
+        forwarded_group = args.group if _option_was_supplied(normalized_argv, "--group") else None
+        results: dict[str, list[tuple[str, str]]] = {"OK": [], "SKIPPED": [], "FAILED": []}
 
         for line in batch_lines:
             adapter = line.adapter or detect_batch_adapter(line.url)
-            command = BATCH_ADAPTER_COMMANDS[adapter]
-
-            shape_problem = "" if line.adapter else known_url_problem(line.url)
-            if shape_problem:
-                batch_failed.append((line.url, shape_problem))
-                print(f"FAILED\t{line.url}\t{adapter}\t{shape_problem}")
-                continue
-
-            before_sources = FeedStore(args.data).sources()
-
-            already_registered = _batch_registered_source(before_sources, line.url)
-            if already_registered is not None:
-                batch_skipped.append((line.url, f"already subscribed as {already_registered.id}"))
-                print(f"SKIPPED\t{line.url}\t{adapter}\t{already_registered.id}\talready subscribed")
-                continue
-
-            child_argv = [
-                "--data",
-                str(args.data),
-                "--private-data",
-                str(args.private_data),
-                "--history",
-                str(args.history),
-                command,
-                line.url,
-                "--profile",
-                args.profile,
-            ]
-            if group_was_supplied:
-                child_argv += ["--group", args.group]
-            if command in BATCH_OUT_DIR_COMMANDS:
-                child_argv += ["--out-dir", str(args.out_dir)]
-
-            # The target command owns the user-facing message for one URL; a batch
-            # needs one line per URL instead, so its output is captured and only
-            # surfaced when it explains a failure.
-            child_output = io.StringIO()
-            child_result = 0
-            child_error: Optional[BaseException] = None
-            try:
-                with redirect_stdout(child_output), redirect_stderr(child_output):
-                    child_result = main(child_argv)
-            except SystemExit as error:
-                child_result = int(error.code or 0)
-            except Exception as error:  # one bad URL must not end the batch
-                child_error = error
-
-            if child_error is not None:
-                detail = (
-                    f"{type(child_error).__name__}: {child_error}"
-                    if args.show_sensitive
-                    else f"{type(child_error).__name__}\t[details redacted; use --show-sensitive]"
-                )
-                batch_failed.append((line.url, detail))
-                print(f"FAILED\t{line.url}\t{adapter}\t{detail}")
-            elif child_result != 0:
-                reported = child_output.getvalue().strip().splitlines()
-                detail = reported[-1].strip() if reported else f"{command} exited {child_result}"
-                batch_failed.append((line.url, detail))
-                print(f"FAILED\t{line.url}\t{adapter}\t{detail}")
-            else:
-                after_sources = FeedStore(args.data).sources()
-                before_ids = {source.id for source in before_sources}
-                added = [source for source in after_sources if source.id not in before_ids]
-                if added:
-                    feed_problem = "" if args.no_verify else _added_source_problem(added[0])
-                    if feed_problem:
-                        # Keep the row for the record, but out of active exports.
-                        demoted = FeedStore(args.data)
-                        demoted.set_status(added[0].id, "candidate")
-                        demoted.save()
-                        detail = (
-                            feed_problem
-                            if args.show_sensitive
-                            else f"{feed_problem.split(':')[0]}\t[details redacted; use --show-sensitive]"
-                        )
-                        reason = f"added but its feed did not validate; set to candidate: {detail}"
-                        batch_failed.append((line.url, reason))
-                        print(f"FAILED\t{line.url}\t{adapter}\t{reason}")
-                    else:
-                        folders = " / ".join(added[0].groups) or "OPML root"
-                        succeeded.append(line.url)
-                        print(f"OK\t{line.url}\t{adapter}\t{added[0].id}\t{folders}")
-                else:
-                    # The command reported success without adding a row, so it
-                    # recognized the URL as one already held.
-                    existing = _batch_registered_source(after_sources, line.url)
-                    label = existing.id if existing is not None else "already present"
-                    batch_skipped.append((line.url, f"already subscribed as {label}"))
-                    print(f"SKIPPED\t{line.url}\t{adapter}\t{label}\talready subscribed")
-
-            if args.pause_seconds > 0:
+            outcome = _subscribe_batch_line(line, adapter, args, forwarded_group)
+            print("\t".join((outcome.status, line.url, adapter, *outcome.columns)))
+            results[outcome.status].append((line.url, outcome.reason))
+            if outcome.dispatched and args.pause_seconds > 0:
                 time.sleep(args.pause_seconds)
 
         print(
-            f"{len(batch_lines)} processed, {len(succeeded)} succeeded, "
-            f"{len(batch_skipped)} skipped, {len(batch_failed)} failed"
+            f"{len(batch_lines)} processed, {len(results['OK'])} succeeded, "
+            f"{len(results['SKIPPED'])} skipped, {len(results['FAILED'])} failed"
         )
-        if batch_failed:
+        if results["FAILED"]:
             print("Re-run these after fixing them:")
-            for url, detail in batch_failed:
-                print(f"FAILED\t{url}\t{detail}")
-        return 1 if batch_failed else 0
+            for url, reason in results["FAILED"]:
+                print(f"FAILED\t{url}\t{reason}")
+        return 1 if results["FAILED"] else 0
 
     if args.command == "set-status":
         source = store.set_status(args.source_id, args.status)
