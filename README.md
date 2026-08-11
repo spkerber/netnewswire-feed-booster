@@ -171,7 +171,8 @@ See [Public Release](docs/public-release.md) for the full release checklist.
 - [Writing A Source Adapter](docs/writing-a-source-adapter.md): security and testing contract for a new generated source type.
 - [Writing A Direct Feed Source](docs/writing-a-direct-feed-source.md): the equivalent contract for a source with its own native feed URL — YouTube, SoundCloud, Substack, Podcasts.
 - [Hosted Bridge](docs/hosting.md): tokenized generated feeds and supported host options.
-- [Contributing](CONTRIBUTING.md): scope and privacy requirements for contributors.
+- [Contributing](CONTRIBUTING.md): scope and privacy requirements for contributors, and how `batch-subscribe` dispatches.
+- [Changelog](CHANGELOG.md): what changed in each release, including upgrade notes.
 
 ## License And Community
 

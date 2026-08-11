@@ -51,12 +51,19 @@ BLOG_FEED_XML = (
 )
 
 
+def _youtube_channel_html(handle: str) -> str:
+    """A distinct channel per handle: same page shape, different id and title."""
+    return YOUTUBE_CHANNEL_HTML.replace("UCfixturechannel", f"UC{handle}").replace(
+        "Fixture Channel", f"Fixture Channel {handle}"
+    )
+
+
 def _fake_fetch(url: str, **_kwargs: object) -> str:
     """Serve each fixture by host, the way the real fetch layer would."""
     if "feeds/videos.xml" in url:
         return YOUTUBE_FEED_XML
     if "youtube.com" in url:
-        return YOUTUBE_CHANNEL_HTML
+        return _youtube_channel_html(url.rstrip("/").rsplit("/", 1)[-1].lstrip("@"))
     if "example.com" in url or "substack.com" in url:
         return BLOG_FEED_XML
     if "bandcamp.com" in url:
@@ -257,7 +264,8 @@ class BatchSubscribeCliTests(unittest.TestCase):
 
         self.assertEqual(groups, [["Listening"], ["Listening"]])
 
-    def test_requests_are_paced_between_urls(self) -> None:
+    def test_every_upstream_request_is_paced_including_verification(self) -> None:
+        """Two URLs, each fetched once to subscribe and once to verify."""
         batch_text = "https://www.youtube.com/@one\nhttps://www.youtube.com/@two\n"
         with TemporaryDirectory() as tmp_dir:
             data_path = Path(tmp_dir) / "sources.json"
@@ -278,7 +286,7 @@ class BatchSubscribeCliTests(unittest.TestCase):
                         ]
                     )
 
-        self.assertEqual(sleep_mock.call_count, 2)
+        self.assertEqual(sleep_mock.call_count, 4)
         sleep_mock.assert_called_with(1.0)
 
     def test_a_malformed_adapter_override_fails_before_any_network_call(self) -> None:

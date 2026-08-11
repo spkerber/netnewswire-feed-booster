@@ -687,7 +687,14 @@ def _subscribe_batch_line(
         # URL as one already held.
         return _already_held_outcome(_batch_registered_source(after_sources, line.url), dispatched=True)
 
-    feed_problem = "" if args.no_verify else _added_source_problem(added, args.show_sensitive)
+    if args.no_verify:
+        feed_problem = ""
+    else:
+        # Verification is a second upstream request for this URL, so it is paced
+        # like the first one rather than following it immediately.
+        if args.pause_seconds > 0:
+            time.sleep(args.pause_seconds)
+        feed_problem = _added_source_problem(added, args.show_sensitive)
     if feed_problem:
         # Keep the row for the record, but out of active exports.
         demoted = FeedStore(args.data)
@@ -987,7 +994,9 @@ def main(argv: Optional[list[str]] = None) -> int:
                 print(
                     f"Not subscribing {domain}: its /feed did not return a feed ({problem}). "
                     "Use the publication root, such as publication.substack.com. A "
-                    "substack.com/@handle profile URL has no feed of its own.",
+                    "substack.com/@handle profile URL has no feed of its own. Pass "
+                    "--no-verify to save it anyway, for example when you are offline "
+                    "and certain of the address.",
                     file=sys.stderr,
                 )
                 return 1

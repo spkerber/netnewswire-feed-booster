@@ -319,7 +319,7 @@ Each newly added source is fetched once more to confirm it really serves a feed.
 
 A URL that is the right site but the wrong page is refused before any fetch, with the shape it should have taken. `https://substack.com/@handle` is the current case.
 
-Requests run one at a time with a one-second pause between them (`--pause-seconds`). `--group` applies to every URL in the batch; omit it to let each type land in its own default folder, which is usually what you want for a mixed list.
+Requests run one at a time with a one-second pause between every upstream request (`--pause-seconds`), verification included, so a long list does not arrive as a burst. `--group` applies to every URL in the batch; omit it to let each type land in its own default folder, which is usually what you want for a mixed list.
 
 Generated sources in the batch write local RSS seeds exactly as the single-URL commands do. Deploying the hosted bridge remains a separate, deliberate step — see [Hosted Bridge](hosting.md).
 
