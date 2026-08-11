@@ -564,7 +564,7 @@ def _constructed_feed_problem(feed_url: str) -> str:
     return ""
 
 
-def _added_source_problem(source: Source) -> str:
+def _added_source_problem(source: Source, show_sensitive: bool) -> str:
     """Check a row a subscribe command just wrote actually points at a feed.
 
     Most commands cannot write a bad feed URL because they had to fetch upstream
@@ -573,7 +573,16 @@ def _added_source_problem(source: Source) -> str:
     """
 
     result = audit_source(source, fetcher=fetch_text)
-    return "" if result.status == "ok" else result.detail
+    if result.status == "ok":
+        return ""
+
+    detail = _redacted_detail(result.detail, show_sensitive)
+    if not result.discovered_url:
+        return detail
+    # audit_source already paid for this lookup on the way to failing; saying what
+    # it found is more use than discarding it. It is a URL, so it redacts too.
+    advertised = result.discovered_url if show_sensitive else "[redacted; use --show-sensitive]"
+    return f"{detail}; the page advertises {advertised}"
 
 
 @dataclass(frozen=True)
@@ -597,13 +606,21 @@ def _redacted_detail(detail: str, show_sensitive: bool) -> str:
     return f"{detail.split(':')[0]}\t[details redacted; use --show-sensitive]"
 
 
-def _already_subscribed_outcome(source_id: str, *, dispatched: bool = False) -> BatchOutcome:
-    return BatchOutcome(
-        "SKIPPED",
-        (source_id, "already subscribed"),
-        f"already subscribed as {source_id}",
-        dispatched=dispatched,
-    )
+def _already_held_outcome(source: Optional[Source], *, dispatched: bool = False) -> BatchOutcome:
+    """Report a URL the registry already stands for, and why it was not re-added.
+
+    An unsubscribed source is skipped on purpose — subscription-history exists so
+    a feed dropped deliberately cannot quietly return — but saying "already
+    subscribed" about it would be untrue and would hide the one command that
+    reverses the decision.
+    """
+
+    source_id = source.id if source is not None else "already present"
+    if source is not None and source.status == "unsubscribed":
+        note = "previously unsubscribed; reactivate with set-status --status active"
+    else:
+        note = "already subscribed"
+    return BatchOutcome("SKIPPED", (source_id, note), f"{note}: {source_id}", dispatched=dispatched)
 
 
 def _subscribe_batch_line(
@@ -628,7 +645,7 @@ def _subscribe_batch_line(
     before_sources = FeedStore(args.data).sources()
     already_registered = _batch_registered_source(before_sources, line.url)
     if already_registered is not None:
-        return _already_subscribed_outcome(already_registered.id)
+        return _already_held_outcome(already_registered)
 
     child_argv = [
         "--data",
@@ -668,21 +685,15 @@ def _subscribe_batch_line(
     if added is None:
         # The command reported success without adding a row, so it recognized the
         # URL as one already held.
-        existing = _batch_registered_source(after_sources, line.url)
-        return _already_subscribed_outcome(
-            existing.id if existing is not None else "already present", dispatched=True
-        )
+        return _already_held_outcome(_batch_registered_source(after_sources, line.url), dispatched=True)
 
-    feed_problem = "" if args.no_verify else _added_source_problem(added)
+    feed_problem = "" if args.no_verify else _added_source_problem(added, args.show_sensitive)
     if feed_problem:
         # Keep the row for the record, but out of active exports.
         demoted = FeedStore(args.data)
         demoted.set_status(added.id, "candidate")
         demoted.save()
-        reason = (
-            "added but its feed did not validate; set to candidate: "
-            + _redacted_detail(feed_problem, args.show_sensitive)
-        )
+        reason = f"added but its feed did not validate; set to candidate: {feed_problem}"
         return BatchOutcome("FAILED", (reason,), reason, dispatched=True)
 
     folders = " / ".join(added.groups) or "OPML root"

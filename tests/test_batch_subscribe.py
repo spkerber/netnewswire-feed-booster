@@ -22,9 +22,11 @@ BANDCAMP_ARTIST_HTML = (
     '&quot;title&quot;:&quot;Fixture Record&quot;,&quot;type&quot;:&quot;album&quot;}]"></ol>'
 )
 YOUTUBE_CHANNEL_HTML = (
+    "<html><head>"
     '<meta property="og:title" content="Fixture Channel">'
     '<link rel="alternate" type="application/rss+xml" title="RSS" '
     'href="https://www.youtube.com/feeds/videos.xml?channel_id=UCfixturechannel">'
+    "</head><body></body></html>"
 )
 YOUTUBE_FEED_XML = (
     '<?xml version="1.0" encoding="UTF-8"?>'
@@ -472,6 +474,46 @@ class BatchGuardTests(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertEqual(len(sources), 1)
         self.assertEqual(sources[0].status, "active")
+
+    def test_a_previously_unsubscribed_url_says_so_rather_than_already_subscribed(self) -> None:
+        """Skipping is right; calling it "already subscribed" is not."""
+        with TemporaryDirectory() as tmp_dir:
+            data_path = Path(tmp_dir) / "sources.json"
+            seeded = FeedStore(data_path)
+            seeded.add_or_update(
+                Source(
+                    id="bandcamp-fixture-artist",
+                    title="Bandcamp: Fixture Artist",
+                    feed_url="file:///already/bandcamp-fixture-artist.rss",
+                    site_url="https://fixture-artist.bandcamp.com/",
+                    kind="bandcamp",
+                    profiles=["test-user"],
+                    groups=["Bandcamp"],
+                )
+            )
+            seeded.set_status("bandcamp-fixture-artist", "unsubscribed")
+            seeded.save()
+
+            result, rendered, store = self._run(tmp_dir, "https://fixture-artist.bandcamp.com/\n")
+            status = store.source_by_id("bandcamp-fixture-artist").status
+
+        self.assertEqual(result, 0)
+        self.assertIn("SKIPPED", rendered)
+        self.assertIn("previously unsubscribed", rendered)
+        self.assertIn("set-status", rendered)
+        self.assertNotIn("already subscribed", rendered)
+        self.assertEqual(status, "unsubscribed")
+
+    def test_a_failed_verification_surfaces_the_feed_the_page_advertises(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            _, redacted, _ = self._run_with_dead_feed(tmp_dir)
+        with TemporaryDirectory() as tmp_dir:
+            _, revealed, _ = self._run_with_dead_feed(tmp_dir, "--show-sensitive")
+
+        self.assertIn("advertises", revealed)
+        self.assertIn("feeds/videos.xml", revealed)
+        # The hint is a URL, so it follows the same redaction rule as everything else.
+        self.assertNotIn("feeds/videos.xml", redacted)
 
     def test_a_generated_file_url_row_still_verifies(self) -> None:
         """Generated sources hold file:// feed URLs; those must not false-fail."""
