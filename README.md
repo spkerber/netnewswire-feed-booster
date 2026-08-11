@@ -63,9 +63,17 @@ Start with NetNewsWire's [download page](https://netnewswire.com/). Choose `On M
 
 Python 3.9 or later, and nothing else. The tool runs on the standard library, so there is no `pip install` step, no lockfile, and no virtual environment to manage. Clone it and it works.
 
+**Do not install Python to satisfy this.** 3.9 is the oldest version supported, not a recommended one. It is the floor because that is what macOS ships as `/usr/bin/python3`, so an untouched Mac already meets it. Check before installing anything:
+
+```bash
+python3 --version
+```
+
+Anything 3.9 or later and you are done. If you are below it, or on a system with no `python3`, install a current Python 3 — newer is better, and the whole supported range behaves identically. Do not install 3.9 specifically, and do not add a second Python beside one that already works.
+
 | What you're doing | What you need |
 | --- | --- |
-| Starter import, registry, OPML export, generated feeds | Python 3.9+ |
+| Starter import, registry, OPML export, generated feeds | Python 3.9+, which macOS already has |
 | Double-clicking `Build Starter Import.command` | macOS with Finder |
 | `git clone` and the `make` shortcuts | Git, GNU Make, and Bash |
 | Hosting generated feeds so they refresh on their own | The optional `modal` extra, below |
