@@ -212,6 +212,8 @@ https://feeds.soundcloud.com/users/soundcloud:users:<USER_ID>/sounds.rss
 
 Use the public publication root, for example `https://publication.substack.com/`. The native feed is usually `https://publication.substack.com/feed`.
 
+A `https://substack.com/@handle` profile link is not a publication root and has no feed of its own, so it cannot be used here. Open the profile and follow it through to the publication, whose address is a `*.substack.com` subdomain. The command builds its feed URL from what you give it, so it now fetches that URL and confirms it returns a feed before saving; a profile link is refused with nothing written. Pass `--no-verify` to skip the check when you are offline and certain of the address.
+
 ```bash
 PYTHONPATH=src python3 -m netnewswire_feed_booster \
   --data "data/sources.${RSS_PROFILE}.json" \
@@ -312,6 +314,10 @@ FAILED   https://typo.example/            URLError  [details redacted; use --sho
 ```
 
 A URL already in the registry is skipped rather than refetched, so re-running the same file is cheap and safe. One bad URL does not stop the rest of the list; failures are repeated at the end so you can fix them and re-run a shorter file. The exit code is nonzero if any URL failed and zero when the only non-successes were skips, which makes it usable in a script. Failure details follow the same rule as every other command here: pass `--show-sensitive` only for a local look, and do not paste that output.
+
+Each newly added source is fetched once more to confirm it really serves a feed. A source that does not is reported as failed and left as a `candidate` rather than `active`, so a dead feed cannot reach your next OPML export; the row stays in the registry for the record. Most commands cannot produce a bad feed URL because they had to fetch upstream to build one, but Substack and YouTube both assemble a URL without fetching it, so the batch confirms rather than assumes. Pass `--no-verify` to skip it.
+
+A URL that is the right site but the wrong page is refused before any fetch, with the shape it should have taken. `https://substack.com/@handle` is the current case.
 
 Requests run one at a time with a one-second pause between them (`--pause-seconds`). `--group` applies to every URL in the batch; omit it to let each type land in its own default folder, which is usually what you want for a mixed list.
 

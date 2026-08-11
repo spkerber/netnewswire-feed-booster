@@ -13,7 +13,12 @@ from urllib.parse import urlparse
 from .bandcamp import (
     write_bandcamp_collection_rss,
 )
-from .batch_subscribe import BATCH_ADAPTER_COMMANDS, detect_batch_adapter, parse_batch_lines
+from .batch_subscribe import (
+    BATCH_ADAPTER_COMMANDS,
+    detect_batch_adapter,
+    known_url_problem,
+    parse_batch_lines,
+)
 from .bandcamp_following import import_bandcamp_following
 from .bandcamp_sources import build_bandcamp_source_from_url
 from .subscription_history import SubscriptionHistoryStore, default_subscription_history_path
@@ -25,7 +30,7 @@ from .feed_identity import (
     likely_same_title,
     parse_feed_identity,
 )
-from .feed_validation import audit_sources, discover_feed_url
+from .feed_validation import audit_source, audit_sources, discover_feed_url, validate_feed_text
 from .generated_migration import apply_generated_source_migration, plan_generated_source_migration
 from .generated_adapters import BANDCAMP_ADAPTER, NTS_ADAPTER, WEBPAGE_ADAPTER, adapter_for_source
 from .bridge_policy import (
@@ -208,6 +213,11 @@ def build_parser() -> argparse.ArgumentParser:
     subscribe_substack_parser.add_argument("--profile", default=DEFAULT_PROFILE)
     subscribe_substack_parser.add_argument("--group", default="")
     subscribe_substack_parser.add_argument("--notes", default="")
+    subscribe_substack_parser.add_argument(
+        "--no-verify",
+        action="store_true",
+        help="Skip the check that the publication actually serves a feed",
+    )
 
     subscribe_youtube_parser = subparsers.add_parser("subscribe-youtube", help="One-off add or reactivate a YouTube channel RSS feed by channel ID")
     subscribe_youtube_parser.add_argument("channel_id")
@@ -390,6 +400,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=1.0,
         help="Delay between URLs, so a large batch doesn't hammer these sites",
     )
+    batch_parser.add_argument(
+        "--no-verify",
+        action="store_true",
+        help="Skip the check that each newly added source serves a real feed",
+    )
     batch_parser.add_argument("--show-sensitive", action="store_true")
 
     status_parser = subparsers.add_parser("set-status", help="Set a source status")
@@ -530,6 +545,33 @@ BATCH_OUT_DIR_COMMANDS = frozenset(
         "subscribe-webpage-feed",
     }
 )
+
+
+def _constructed_feed_problem(feed_url: str) -> str:
+    """Confirm a feed URL built by string assembly really serves a feed.
+
+    Redirects are pinned to the URL's own host: this validates a URL the caller
+    supplied, so the target host is the only one it should be able to reach.
+    """
+
+    host = urlparse(feed_url).hostname or ""
+    try:
+        validate_feed_text(fetch_text(feed_url, allowed_hosts=frozenset({host})))
+    except Exception as error:
+        return f"{type(error).__name__}: {error}"
+    return ""
+
+
+def _added_source_problem(source: Source) -> str:
+    """Check a row a subscribe command just wrote actually points at a feed.
+
+    Most commands cannot write a bad feed URL because they had to fetch upstream
+    to build one. The ones that assemble a URL without fetching it — Substack and
+    YouTube both do — can, so the batch confirms rather than assumes.
+    """
+
+    result = audit_source(source, fetcher=fetch_text)
+    return "" if result.status == "ok" else result.detail
 
 
 def _batch_registered_source(sources: list[Source], url: str) -> Optional[Source]:
@@ -810,6 +852,19 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     if args.command == "subscribe-substack":
         domain = args.domain_or_url.replace("https://", "").replace("http://", "").strip("/")
+        # This command builds its feed URL by concatenation rather than by
+        # resolving anything upstream, so without this check any string at all
+        # becomes an active source pointing at a URL nobody has ever fetched.
+        if not args.no_verify:
+            problem = _constructed_feed_problem(f"https://{domain}/feed")
+            if problem:
+                print(
+                    f"Not subscribing {domain}: its /feed did not return a feed ({problem}). "
+                    "Use the publication root, such as publication.substack.com. A "
+                    "substack.com/@handle profile URL has no feed of its own.",
+                    file=sys.stderr,
+                )
+                return 1
         title = args.title or domain.replace(".substack.com", "").replace("www.", "")
         source = Source(
             id=source_id_from_title(title, domain),
@@ -1201,6 +1256,13 @@ def main(argv: Optional[list[str]] = None) -> int:
         for line in batch_lines:
             adapter = line.adapter or detect_batch_adapter(line.url)
             command = BATCH_ADAPTER_COMMANDS[adapter]
+
+            shape_problem = "" if line.adapter else known_url_problem(line.url)
+            if shape_problem:
+                batch_failed.append((line.url, shape_problem))
+                print(f"FAILED\t{line.url}\t{adapter}\t{shape_problem}")
+                continue
+
             before_sources = FeedStore(args.data).sources()
 
             already_registered = _batch_registered_source(before_sources, line.url)
@@ -1258,9 +1320,24 @@ def main(argv: Optional[list[str]] = None) -> int:
                 before_ids = {source.id for source in before_sources}
                 added = [source for source in after_sources if source.id not in before_ids]
                 if added:
-                    folders = " / ".join(added[0].groups) or "OPML root"
-                    succeeded.append(line.url)
-                    print(f"OK\t{line.url}\t{adapter}\t{added[0].id}\t{folders}")
+                    feed_problem = "" if args.no_verify else _added_source_problem(added[0])
+                    if feed_problem:
+                        # Keep the row for the record, but out of active exports.
+                        demoted = FeedStore(args.data)
+                        demoted.set_status(added[0].id, "candidate")
+                        demoted.save()
+                        detail = (
+                            feed_problem
+                            if args.show_sensitive
+                            else f"{feed_problem.split(':')[0]}\t[details redacted; use --show-sensitive]"
+                        )
+                        reason = f"added but its feed did not validate; set to candidate: {detail}"
+                        batch_failed.append((line.url, reason))
+                        print(f"FAILED\t{line.url}\t{adapter}\t{reason}")
+                    else:
+                        folders = " / ".join(added[0].groups) or "OPML root"
+                        succeeded.append(line.url)
+                        print(f"OK\t{line.url}\t{adapter}\t{added[0].id}\t{folders}")
                 else:
                     # The command reported success without adding a row, so it
                     # recognized the URL as one already held.

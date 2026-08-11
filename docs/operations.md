@@ -31,7 +31,7 @@ python3 -m netnewswire_feed_booster set-folder source-id "My Folder" "Optional S
 python3 -m netnewswire_feed_booster unsubscribe source-id another-source-id --reason "Too noisy" --profile "$RSS_PROFILE"
 ```
 
-`batch-subscribe` reads a file of URLs, one per line, and routes each to the command it would have gone to anyway; a line may end with `--adapter=<adapter>` to force one. Already-registered URLs are skipped rather than refetched, one failing URL does not stop the rest, and the exit code is nonzero if any failed. It adds no subscribe behavior of its own, so folder defaults and duplicate checks match the single-URL commands — see [Multiple Sources At Once](source-collection.md#multiple-sources-at-once).
+`batch-subscribe` reads a file of URLs, one per line, and routes each to the command it would have gone to anyway; a line may end with `--adapter=<adapter>` to force one. Already-registered URLs are skipped rather than refetched, one failing URL does not stop the rest, and the exit code is nonzero if any failed. Each new source is checked to confirm it serves a real feed; one that does not is reported and left as a `candidate` so it stays out of the next export (`--no-verify` skips this). It adds no subscribe behavior of its own, so folder defaults and duplicate checks match the single-URL commands — see [Multiple Sources At Once](source-collection.md#multiple-sources-at-once).
 
 For accepted URLs and source-export formats, including Google Takeout's YouTube `subscriptions.csv`, see [Collect Sources](source-collection.md).
 

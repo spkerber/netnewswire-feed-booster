@@ -103,6 +103,26 @@ def _validated_adapter(adapter: str, line_number: int) -> str:
     return adapter
 
 
+def known_url_problem(url: str) -> str:
+    """Return why a URL cannot be subscribed as given, or "" when it looks usable.
+
+    Some URLs are the right site but the wrong page, and the adapter they detect
+    to would happily build a feed URL from them that answers 404. Naming the
+    problem here turns a dead subscription into an actionable message.
+    """
+
+    parsed = urlparse(url if "://" in url else f"https://{url}")
+    hostname = (parsed.hostname or "").lower().rstrip(".")
+    path = parsed.path or "/"
+
+    if hostname in {"substack.com", "www.substack.com"} and path.startswith("/@"):
+        return (
+            "Substack profile URL, which has no feed of its own. Use the "
+            "publication subdomain instead, e.g. https://<publication>.substack.com/"
+        )
+    return ""
+
+
 def detect_batch_adapter(url: str) -> str:
     """Return the adapter a URL belongs to, defaulting to public feed discovery.
 

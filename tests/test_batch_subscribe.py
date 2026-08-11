@@ -26,6 +26,20 @@ YOUTUBE_CHANNEL_HTML = (
     '<link rel="alternate" type="application/rss+xml" title="RSS" '
     'href="https://www.youtube.com/feeds/videos.xml?channel_id=UCfixturechannel">'
 )
+YOUTUBE_FEED_XML = (
+    '<?xml version="1.0" encoding="UTF-8"?>'
+    '<rss version="2.0"><channel><title>Fixture Channel</title>'
+    "<link>https://www.youtube.com/channel/UCfixturechannel</link>"
+    "<item><guid>fixture-video-1</guid><title>First video</title></item>"
+    "</channel></rss>"
+)
+BANDCAMP_RSS = (
+    '<?xml version="1.0" encoding="UTF-8"?>'
+    '<rss version="2.0"><channel><title>Bandcamp: Fixture Artist</title>'
+    "<link>https://fixture-artist.bandcamp.com/</link>"
+    "<item><guid>fixture-record</guid><title>Fixture Record</title></item>"
+    "</channel></rss>"
+)
 BLOG_FEED_XML = (
     '<?xml version="1.0" encoding="UTF-8"?>'
     '<rss version="2.0"><channel><title>Fixture Blog</title>'
@@ -37,6 +51,8 @@ BLOG_FEED_XML = (
 
 def _fake_fetch(url: str, **_kwargs: object) -> str:
     """Serve each fixture by host, the way the real fetch layer would."""
+    if "feeds/videos.xml" in url:
+        return YOUTUBE_FEED_XML
     if "youtube.com" in url:
         return YOUTUBE_CHANNEL_HTML
     if "example.com" in url or "substack.com" in url:
@@ -54,7 +70,7 @@ class BatchSubscribeCliTests(unittest.TestCase):
         output = io.StringIO()
 
         with patch("netnewswire_feed_booster.bandcamp_sources.fetch_text", side_effect=_fake_fetch), patch(
-            "netnewswire_feed_booster.cli.render_bandcamp_source_rss", return_value="<rss></rss>"
+            "netnewswire_feed_booster.cli.render_bandcamp_source_rss", return_value=BANDCAMP_RSS
         ), patch("netnewswire_feed_booster.cli.fetch_text", side_effect=_fake_fetch), patch(
             "netnewswire_feed_booster.cli.discover_feed_url", side_effect=lambda url, **_: url
         ), patch("netnewswire_feed_booster.cli.time.sleep"):
@@ -298,9 +314,6 @@ class BatchSubscribeCliTests(unittest.TestCase):
             self.assertIn(expected, rendered)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 
 class ParseBatchLinesTests(unittest.TestCase):
@@ -379,6 +392,96 @@ class DetectBatchAdapterTests(unittest.TestCase):
 
     def test_an_unrecognized_nts_path_is_not_treated_as_a_show(self) -> None:
         self.assertEqual(detect_batch_adapter("https://www.nts.live/latest"), "feed-url")
+
+
+class BatchGuardTests(unittest.TestCase):
+    """Guards against a subscription that succeeds but points at a dead feed."""
+
+    def _run(self, tmp_dir: str, batch_text: str, *extra: str) -> tuple[int, str, FeedStore]:
+        return BatchSubscribeCliTests._run_batch(self, tmp_dir, batch_text, *extra)
+
+    def _run_with_dead_feed(self, tmp_dir: str, *extra: str) -> tuple[int, str, list]:
+        """A YouTube channel whose advertised feed URL does not serve a feed.
+
+        import-youtube-channel-url reads the channel page and takes the alternate
+        link at its word without ever fetching it, so it reports success while
+        writing a feed URL that answers with HTML. Substack cannot stand in here
+        any more: it now checks its own feed before saving.
+        """
+
+        def fetch(url: str, **kwargs: object) -> str:
+            if "feeds/videos.xml" in url:
+                return "<html><body>not a feed</body></html>"
+            return _fake_fetch(url, **kwargs)
+
+        data_path = Path(tmp_dir) / "sources.json"
+        batch_path = Path(tmp_dir) / "urls.txt"
+        batch_path.write_text("https://www.youtube.com/@fixture\n", encoding="utf-8")
+        output = io.StringIO()
+        with patch("netnewswire_feed_booster.cli.fetch_text", side_effect=fetch), patch(
+            "netnewswire_feed_booster.cli.time.sleep"
+        ):
+            with redirect_stdout(output), redirect_stderr(io.StringIO()):
+                result = main(
+                    [
+                        "--data",
+                        str(data_path),
+                        "batch-subscribe",
+                        str(batch_path),
+                        "--profile",
+                        "test-user",
+                        *extra,
+                    ]
+                )
+        return result, output.getvalue(), FeedStore(data_path).sources()
+
+    def test_a_substack_profile_url_is_rejected_with_a_pointer_to_the_publication(self) -> None:
+        batch_text = "https://substack.com/@ghosttropicssound/posts\nhttps://www.youtube.com/@fixture\n"
+        with TemporaryDirectory() as tmp_dir:
+            result, rendered, store = self._run(tmp_dir, batch_text)
+            sources = store.sources()
+
+        self.assertEqual(result, 1)
+        self.assertIn("publication subdomain", rendered)
+        self.assertEqual(len(sources), 1)
+        self.assertEqual(sources[0].kind, "youtube")
+
+    def test_a_publication_subdomain_is_not_rejected(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            result, _, store = self._run(tmp_dir, "https://publication.substack.com/\n")
+            source_count = len(store.sources())
+
+        self.assertEqual(result, 0)
+        self.assertEqual(source_count, 1)
+
+    def test_a_row_whose_feed_does_not_validate_is_reported_and_left_out_of_exports(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            result, rendered, sources = self._run_with_dead_feed(tmp_dir)
+
+        self.assertEqual(result, 1)
+        self.assertIn("did not validate", rendered)
+        self.assertIn("1 failed", rendered)
+        # The row is kept for the record but demoted, so exports skip it.
+        self.assertEqual(len(sources), 1)
+        self.assertEqual(sources[0].status, "candidate")
+
+    def test_verification_can_be_turned_off(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            result, _, sources = self._run_with_dead_feed(tmp_dir, "--no-verify")
+
+        self.assertEqual(result, 0)
+        self.assertEqual(len(sources), 1)
+        self.assertEqual(sources[0].status, "active")
+
+    def test_a_generated_file_url_row_still_verifies(self) -> None:
+        """Generated sources hold file:// feed URLs; those must not false-fail."""
+        with TemporaryDirectory() as tmp_dir:
+            result, rendered, store = self._run(tmp_dir, "https://fixture-artist.bandcamp.com/\n")
+            sources = store.sources()
+
+        self.assertEqual(result, 0)
+        self.assertIn("OK", rendered)
+        self.assertEqual(sources[0].status, "active")
 
 
 if __name__ == "__main__":

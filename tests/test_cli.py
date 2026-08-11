@@ -571,6 +571,7 @@ class CliTests(unittest.TestCase):
                 main(
                     [
                         "subscribe-substack",
+                        "--no-verify",
                         "fixture-letter.example",
                         "--title",
                         "Fixture Letter",
@@ -620,6 +621,7 @@ class CliTests(unittest.TestCase):
                         "--data",
                         str(data_path),
                         "subscribe-substack",
+                        "--no-verify",
                         "private-token.example",
                         "--title",
                         "Fixture Letter",
@@ -654,6 +656,7 @@ class CliTests(unittest.TestCase):
                         "--history",
                         str(history_path),
                         "subscribe-substack",
+                        "--no-verify",
                         "fixture-letter.example",
                         "--title",
                         "Fixture Letter",

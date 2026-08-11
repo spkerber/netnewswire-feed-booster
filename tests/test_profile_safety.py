@@ -112,6 +112,7 @@ class ProfileSafetyTests(unittest.TestCase):
                 main(
                     [
                         "subscribe-substack",
+                        "--no-verify",
                         "fixture-letter.example",
                         "--title",
                         "Fixture Letter",
