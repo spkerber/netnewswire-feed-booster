@@ -4,6 +4,18 @@ Notable changes per release. The [GitHub releases](https://github.com/spkerber/n
 
 > **Version metadata before 0.3.0.** `pyproject.toml` read `0.1.0` through the v0.2.0 release, so no published artifact ever declared `0.2.0`. Use the git tag, not the package metadata, to identify anything older than 0.3.0.
 
+## 0.3.1 — 2026-08-11
+
+### Fixed
+
+- `--pause-seconds` now paces every upstream request rather than only the gap between URLs. Verifying a newly added source is a second request for that URL, and it was following the first one immediately, so a long `batch-subscribe` run went out in unthrottled pairs instead of at the rate the flag promised.
+
+### Changed
+
+- The `subscribe-substack` refusal names `--no-verify`. Anyone who meets that check while offline is the least able to go and read about the way out, so it belongs in the message.
+- Added `CHANGELOG.md` and a `CONTRIBUTING.md` section explaining how `batch-subscribe` dispatches, since calling `main()` recursively reads as a mistake until you know what it buys.
+- The README states that Python 3.9 is the supported floor, not a recommendation. It is the floor because macOS ships it as `/usr/bin/python3`, so most machines already satisfy it and should install nothing.
+
 ## 0.3.0 — 2026-08-11
 
 ### Added
