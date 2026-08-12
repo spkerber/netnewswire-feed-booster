@@ -1053,6 +1053,47 @@ class CliTests(unittest.TestCase):
         self.assertIsNotNone(source)
         self.assertEqual(source.groups, ["Bandcamp"])
 
+    def test_retitling_a_bandcamp_source_keeps_the_generated_file_named_for_its_id(self) -> None:
+        artist_html = '''
+        <meta property="og:site_name" content="Fixture Artist">
+        <ol id="music-grid" data-client-items="[{&quot;art_id&quot;:1463768112,&quot;artist&quot;:&quot;Fixture Artist&quot;,&quot;page_url&quot;:&quot;/album/fixture-record&quot;,&quot;title&quot;:&quot;Fixture Record&quot;,&quot;type&quot;:&quot;album&quot;}]"></ol>
+        '''
+
+        def subscribe(data_path: Path, out_dir: Path, *extra: str) -> None:
+            with patch("netnewswire_feed_booster.bandcamp_sources.fetch_text", return_value=artist_html):
+                with patch("netnewswire_feed_booster.cli.render_bandcamp_source_rss", return_value="<rss></rss>"):
+                    with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                        main(
+                            [
+                                "--data",
+                                str(data_path),
+                                "subscribe-bandcamp-source",
+                                "https://fixture-artist.bandcamp.com/",
+                                "--out-dir",
+                                str(out_dir),
+                                *extra,
+                            ]
+                        )
+
+        with TemporaryDirectory() as tmp_dir:
+            data_path = Path(tmp_dir) / "sources.json"
+            out_dir = Path(tmp_dir) / "bandcamp"
+
+            subscribe(data_path, out_dir)
+            subscribe(data_path, out_dir, "--title", "Bandcamp: Fixture Artist Alt")
+
+            sources = FeedStore(data_path).sources()
+            rss_names = sorted(path.name for path in out_dir.glob("*.rss"))
+
+        self.assertEqual(len(sources), 1)
+        source = sources[0]
+        self.assertEqual(source.id, "bandcamp-fixture-artist")
+        self.assertEqual(source.title, "Bandcamp: Fixture Artist Alt")
+        # The hosted bridge seeds and serves <source_id>.rss, so the generated
+        # file and the registry must both stay pinned to the id, not the title.
+        self.assertEqual(source.feed_url.rsplit("/", 1)[-1], f"{source.id}.rss")
+        self.assertEqual(rss_names, [f"{source.id}.rss"])
+
     def test_set_folder_updates_private_overlay_only_when_requested(self) -> None:
         with TemporaryDirectory() as tmp_dir:
             data_path = Path(tmp_dir) / "sources.json"
