@@ -25,6 +25,7 @@ data/private-*.env
 data/sources.*.json
 data/subscription-history.*.json
 data/profiles.*.json
+data/*.backup-*
 logs/
 !imports/.gitkeep
 !exports/.gitkeep
