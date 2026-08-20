@@ -1326,6 +1326,11 @@ def main(argv: Optional[list[str]] = None) -> int:
             source_type=args.source_type,
             out_dir=args.out_dir,
         )
+        # build_bandcamp_source_from_url derives the id from the title, but an
+        # existing source keeps its stored id on merge. Settle the id first so
+        # the generated file is named for the id the bridge actually serves.
+        source.id = store.resolve_source_id(source)
+        source.feed_url = (args.out_dir / f"{source.id}.rss").resolve().as_uri()
 
         if not args.no_refresh:
             rss = render_bandcamp_source_rss(

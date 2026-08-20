@@ -177,14 +177,11 @@ class FeedStore:
             source.groups = normalize_groups_for_source(source)
         self.data["sources"] = [item.to_dict() for item in sorted(sources, key=lambda item: item.title.lower())]
 
-    def add_or_update(self, source: Source) -> str:
+    def _existing_match(self, sources: List[Source], source: Source) -> Optional[Source]:
         from .feed_identity import canonical_url
 
-        source.groups = normalize_groups_for_source(source)
-        self._validate(source)
-        sources = self.sources()
         canonical_site = canonical_url(source.site_url)
-        existing = next(
+        return next(
             (
                 item
                 for item in sources
@@ -199,6 +196,28 @@ class FeedStore:
             ),
             None,
         )
+
+    def resolve_source_id(self, source: Source) -> str:
+        """Return the id `add_or_update` would settle on, without changing anything.
+
+        Generated feeds are written to `<source_id>.rss` before the source is
+        merged, and the hosted bridge seeds and serves strictly by id. A caller
+        that writes the file first needs the final id up front, or the file
+        lands under a name nothing ever reads.
+        """
+        sources = self.sources()
+        existing = self._existing_match(sources, source)
+        if existing:
+            if existing.id == "source" and source.id != "source":
+                return source.id
+            return existing.id
+        return unique_id(source.id, {item.id for item in sources})
+
+    def add_or_update(self, source: Source) -> str:
+        source.groups = normalize_groups_for_source(source)
+        self._validate(source)
+        sources = self.sources()
+        existing = self._existing_match(sources, source)
         if existing:
             if existing.id == "source" and source.id != "source":
                 existing.id = source.id

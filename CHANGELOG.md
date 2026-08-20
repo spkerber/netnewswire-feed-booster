@@ -4,6 +4,12 @@ Notable changes per release. The [GitHub releases](https://github.com/spkerber/n
 
 > **Version metadata before 0.3.0.** `pyproject.toml` read `0.1.0` through the v0.2.0 release, so no published artifact ever declared `0.2.0`. Use the git tag, not the package metadata, to identify anything older than 0.3.0.
 
+## Unreleased
+
+### Fixed
+
+- Retitling an existing generated source no longer orphans its feed. `subscribe-bandcamp-source --title` derives the source ID from the title, but a source already in the registry keeps its stored ID when it merges, so the RSS was written under a name the registry never pointed at. The hosted bridge seeds and serves strictly by ID, which made this quiet rather than loud: the served feed went on returning the old title, and the cache prune deleted the newly written file for not matching any active source ID. The ID is now settled against the registry before anything is written, so the generated file and `feed_url` stay pinned to `<source_id>.rss`. The same ordering fixes a new source whose slug collides with an existing one, where the file was written under the base name before the merge appended the `-2` suffix.
+
 ## 0.3.1 — 2026-08-11
 
 ### Fixed
