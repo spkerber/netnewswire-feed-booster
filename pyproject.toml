@@ -14,8 +14,8 @@ dependencies = []
 
 [project.optional-dependencies]
 modal = [
-  "fastapi[standard]>=0.115.8",
-  "modal>=1.5.3",
+  "fastapi[standard]>=0.141.1",
+  "modal>=1.5.4",
 ]
 
 [project.scripts]
