@@ -250,13 +250,13 @@ def _refresh_state_path(source_id: str) -> Path:
     return REFRESH_STATE_DIR / f"{validate_source_id(source_id)}.json"
 
 
-def _source_is_due(source_id: str, now: float) -> bool:
+def _last_refresh_attempt(source_id: str) -> Optional[float]:
+    """None when the source has no readable attempt yet, so it is refreshed first."""
     try:
         state = json.loads(_refresh_state_path(source_id).read_text(encoding="utf-8"))
-        last_attempt = float(state.get("last_attempt", 0))
-    except (FileNotFoundError, ValueError, json.JSONDecodeError):
-        return True
-    return now - last_attempt >= REFRESH_INTERVAL_SECONDS
+        return float(state["last_attempt"])
+    except (FileNotFoundError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return None
 
 
 def _mark_refresh_attempt(source_id: str, now: float) -> None:
@@ -395,7 +395,13 @@ def _refresh_due_sources(sources, refresh_source, prune_retired: bool = False) -
     _reload_cache_volume()
     pruned = _prune_retired_cache_files() if prune_retired else 0
 
-    for source in due_sources(sources, lambda item: _source_is_due(item.id, now), MAX_REFRESH_SOURCES_PER_RUN):
+    for source in due_sources(
+        sources,
+        lambda item: _last_refresh_attempt(item.id),
+        now,
+        REFRESH_INTERVAL_SECONDS,
+        MAX_REFRESH_SOURCES_PER_RUN,
+    ):
         try:
             refresh_source(source)
             refreshed += 1
