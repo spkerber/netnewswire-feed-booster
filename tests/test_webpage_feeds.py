@@ -1,5 +1,6 @@
 import unittest
 
+from netnewswire_feed_booster.rss_safety import limit_rss_items
 from netnewswire_feed_booster.webpage_feeds import (
     ParsedWebpageFeed,
     WebpageFeedItem,
@@ -8,7 +9,11 @@ from netnewswire_feed_booster.webpage_feeds import (
     recipe_fetch_url,
     render_webpage_feed_rss,
 )
-from netnewswire_feed_booster.webpage_recipes import HYDEFM_ARCHIVE_RECIPE
+from netnewswire_feed_booster.webpage_recipes import (
+    HYDEFM_ARCHIVE_RECIPE,
+    OSGH_NEON_SHRINES_RECIPE,
+    webpage_recipe_for_url,
+)
 
 
 HYDEFM_HTML = """
@@ -31,6 +36,35 @@ HYDEFM_HTML = """
   <h2>July 1, 2026</h2>
   <h2><a href="https://hydefm.com/archive/fluxions-w-vertigo-07-01-26/">FLUXIONS w/ Vertigo</a></h2>
 </div>
+"""
+
+
+# Shapes copied from the live Squarespace page (October 2026), trimmed to five
+# episodes: pre-wrap song lists broken by runs of spaces instead of <br>, a
+# season's Download buttons stacked under its last episode, and the site footer
+# straight after the last episode.
+PRE_WRAP_GAP = " " * 76
+NEON_SHRINES_HTML = f"""
+<div class="sqs-html-content"><h3>NEON SHRINES is the official radio show of the OSGH</h3>
+<p>(clicking DOWNLOAD does not actually download the show)</p></div>
+<div class="sqs-html-content"><h1>Season three of NEON SHRINES</h1></div>
+<div class="sqs-html-content"><h1>*</h1></div>
+<div class="sqs-html-content"><h1>Season three of NEON SHRINES * Season three of NEON SHRINES *</h1></div>
+<div class="sqs-html-content" data-sqsp-text-block-content><h2 style="white-space:pre-wrap;"><span class="sqsrte-text-color--black">Episode 1: The Return of NEON SHRINES, again!</span></h2></div>
+<div class="sqs-html-content"><p class="" style="white-space:pre-wrap;">July 24, 2026 4:00pm</p></div>
+<div class="sqs-html-content"><p style="white-space:pre-wrap;">In this episode, Stella &amp; Jojo &amp; Mac discuss the institutionalization of the OSGH.</p>
+<p class="sqsrte-small" style="white-space:pre-wrap;" data-rte-preserve-empty="true">Songs:          <br>Angra - Wuthering Heights{PRE_WRAP_GAP}John Sinclair -  Ain’t Nobody’s Business{PRE_WRAP_GAP}Kylie Minogue - Love at First Sight</p></div>
+<div class="sqs-html-content"><h2><span>Episode 2: Time Pilgrims &amp; Camino Report (ft. Matthew)</span></h2></div>
+<div class="sqs-html-content"><p>July 31, 2026 4:00pm</p><p>We discuss time pilgrims.</p><p style="white-space:pre-wrap;" data-rte-preserve-empty="true">Songs:</p><p style="white-space:pre-wrap;" data-rte-preserve-empty="true">Gorillaz -&nbsp; Dracula{PRE_WRAP_GAP}Yeah Yeah Yeahs- Gold Lion{PRE_WRAP_GAP}&nbsp;{PRE_WRAP_GAP}Gang of Four  - Damaged Goods{PRE_WRAP_GAP}</p></div>
+<div class="sqs-block-button"><a href="https://drive.google.com/file/d/1eWicgh2eHJ0MkTDemXAC46YPpXhYYd33/view?usp=sharing">Download</a></div>
+<div class="sqs-block-button"><a href="https://drive.google.com/file/d/1QyEpGHVSY00KDp3Nk8dDy_YK2ydzurlf/view?usp=drive_link">Download</a></div>
+<div class="sqs-html-content"><h1>Season two of NEON SHRINES</h1></div>
+<div class="sqs-html-content"><h2>Episode 1: Back on the Road</h2><p>September 2, 2022 4:00pm</p><p>Stella &amp; Jojo reflect on the typology of pilgrimages.</p><p class="" style="white-space:pre-wrap;" data-rte-preserve-empty="true">Songs: </p><p class="" style="white-space:pre-wrap;" data-rte-preserve-empty="true"><br>Modjo - Lady <br>Corona - The Rhythm of the Night <br>Eiffel 65 - Blue</p></div>
+<div class="sqs-block-button"><a href="https://drive.google.com/file/d/1HAlovPgl0dzmE0EaTAtX1Xi3zD8njP06/view?usp=sharing">Download</a></div>
+<div class="sqs-html-content"><h2>Episode 57: Peals of laughter &amp; thunder (ft. Ricky &amp; RevDev)</h2><p>February 23, 2024</p></div>
+<div class="sqs-block-button"><a href="https://evil.example/file/d/1HAlovPgl0dzmE0EaTAtX1Xi3zD8njP06/view">Download</a></div>
+<div class="sqs-html-content" data-sqsp-text-block-content><h2 style="white-space:pre-wrap;">Goodbye Neon Shrines Vol. 4</h2><p class="" style="white-space:pre-wrap;">October 11, 2024</p><p class="" data-rte-preserve-empty="true" style="white-space:pre-wrap;"></p></div>
+<footer class="sections" id="footer-sections" data-footer-sections><section data-test="page-section"><div class="sqs-html-content"><p><span class="sqsrte-text-color--lightAccent">Made with </span><a href="http://squarespace.com" target="_blank"><span class="sqsrte-text-color--lightAccent">Squarespace</span></a></p><p><a href="mailto:email@example.com?" target="_blank">Email </a></p><p><span class="sqsrte-text-color--lightAccent">Copyright. All rights reserved.</span></p></div></section></footer>
 """
 
 
@@ -171,6 +205,149 @@ class WebpageFeedTests(unittest.TestCase):
             with self.subTest(url=unsupported_url):
                 with self.assertRaises(ValueError):
                     recipe_fetch_url(HYDEFM_ARCHIVE_RECIPE, unsupported_url)
+
+
+    def test_neon_shrines_recipe_reads_seasons_dates_songs_and_safe_audio_links(self) -> None:
+        parsed = parse_webpage_feed(
+            OSGH_NEON_SHRINES_RECIPE,
+            NEON_SHRINES_HTML,
+            OSGH_NEON_SHRINES_RECIPE.default_url,
+        )
+        titles = [item.title for item in parsed.items]
+
+        self.assertEqual(parsed.title, "NEON SHRINES")
+        self.assertEqual(
+            titles,
+            [
+                "S3 Episode 2: Time Pilgrims & Camino Report (ft. Matthew)",
+                "S3 Episode 1: The Return of NEON SHRINES, again!",
+                "S2 Goodbye Neon Shrines Vol. 4",
+                "S2 Episode 57: Peals of laughter & thunder (ft. Ricky & RevDev)",
+                "S2 Episode 1: Back on the Road",
+            ],
+        )
+        second, first, goodbye, no_time, season_two = parsed.items
+        self.assertEqual(first.published_at, "July 24, 2026 4:00pm")
+        # A season's buttons stacked under its last episode are ambiguous, so none is attached.
+        self.assertNotIn("Audio", second.details)
+        self.assertEqual(
+            season_two.details["Audio"],
+            ["https://drive.google.com/file/d/1HAlovPgl0dzmE0EaTAtX1Xi3zD8njP06/view"],
+        )
+        self.assertNotIn("Audio", no_time.details)
+        self.assertNotIn("Audio", goodbye.details)
+
+    def test_neon_shrines_splits_song_lists_on_runs_of_spaces_and_breaks(self) -> None:
+        second, first, _goodbye, _no_time, season_two = parse_webpage_feed(
+            OSGH_NEON_SHRINES_RECIPE,
+            NEON_SHRINES_HTML,
+            OSGH_NEON_SHRINES_RECIPE.default_url,
+        ).items
+
+        # The double space inside "John Sinclair -  Ain’t" is not a break.
+        self.assertEqual(
+            first.details["Songs"],
+            ["Angra - Wuthering Heights", "John Sinclair - Ain’t Nobody’s Business", "Kylie Minogue - Love at First Sight"],
+        )
+        self.assertEqual(
+            second.details["Songs"],
+            ["Gorillaz - Dracula", "Yeah Yeah Yeahs- Gold Lion", "Gang of Four - Damaged Goods"],
+        )
+        self.assertEqual(
+            season_two.details["Songs"],
+            ["Modjo - Lady", "Corona - The Rhythm of the Night", "Eiffel 65 - Blue"],
+        )
+
+    def test_neon_shrines_ignores_the_site_footer(self) -> None:
+        goodbye = parse_webpage_feed(
+            OSGH_NEON_SHRINES_RECIPE,
+            NEON_SHRINES_HTML,
+            OSGH_NEON_SHRINES_RECIPE.default_url,
+        ).items[2]
+
+        self.assertEqual(goodbye.title, "S2 Goodbye Neon Shrines Vol. 4")
+        self.assertEqual(goodbye.details, {"Aired": ["October 11, 2024"]})
+
+    def test_neon_shrines_lists_newest_first_so_the_bridge_cap_keeps_recent_episodes(self) -> None:
+        rss = render_webpage_feed_rss(
+            OSGH_NEON_SHRINES_RECIPE,
+            OSGH_NEON_SHRINES_RECIPE.default_url,
+            NEON_SHRINES_HTML,
+        )
+
+        # In page order, a cap of three would keep season two's oldest episode
+        # and drop its newest.
+        capped = limit_rss_items(rss, 3)
+        self.assertIn("Goodbye Neon Shrines Vol. 4", capped)
+        self.assertNotIn("Back on the Road", capped)
+
+    def test_neon_shrines_identity_is_the_air_date(self) -> None:
+        def url_aired_on(html: str, published_at: str) -> str:
+            items = parse_webpage_feed(OSGH_NEON_SHRINES_RECIPE, html, OSGH_NEON_SHRINES_RECIPE.default_url).items
+            return next(item.url for item in items if item.published_at == published_at)
+
+        self.assertEqual(
+            url_aired_on(NEON_SHRINES_HTML, "September 2, 2022 4:00pm"),
+            "https://www.osghpress.com/neon-shrines?episode=2022-09-02",
+        )
+        # Retitling an episode on the page must not make it a new item.
+        retitled = NEON_SHRINES_HTML.replace("Episode 1: Back on the Road", "Episode 1: Back on the Road (ft. Jeb)")
+        self.assertEqual(
+            url_aired_on(retitled, "September 2, 2022 4:00pm"),
+            "https://www.osghpress.com/neon-shrines?episode=2022-09-02",
+        )
+
+    def test_neon_shrines_keeps_same_day_episodes_and_skips_non_dates(self) -> None:
+        html = """
+        <h1>Season two of NEON SHRINES</h1>
+        <h2>Episode 9: Morning Special</h2><p>Volume 2, 2024 of the zine is out.</p><p>March 1, 2024 10:00am</p>
+        <h2>Episode 10: Afternoon Special</h2><p>March 1, 2024 4:00pm</p>
+        """
+        afternoon, morning = parse_webpage_feed(
+            OSGH_NEON_SHRINES_RECIPE,
+            html,
+            OSGH_NEON_SHRINES_RECIPE.default_url,
+        ).items
+
+        self.assertEqual(morning.url, "https://www.osghpress.com/neon-shrines?episode=2024-03-01")
+        self.assertEqual(
+            afternoon.url,
+            "https://www.osghpress.com/neon-shrines?episode=2024-03-01-episode-10-afternoon-special",
+        )
+        # "Volume 2, 2024" fits the date pattern but is not a date.
+        self.assertEqual(morning.published_at, "March 1, 2024 10:00am")
+        self.assertEqual(morning.details["About"], ["Volume 2, 2024 of the zine is out."])
+
+    def test_neon_shrines_rss_uses_pacific_air_times(self) -> None:
+        rss = render_webpage_feed_rss(
+            OSGH_NEON_SHRINES_RECIPE,
+            OSGH_NEON_SHRINES_RECIPE.default_url,
+            NEON_SHRINES_HTML,
+        )
+
+        self.assertIn("<title>NEON SHRINES</title>", rss)
+        self.assertIn("Fri, 24 Jul 2026 16:00:00 -0700", rss)
+        # No listed time falls back to the 4pm slot, in PST for February.
+        self.assertIn("Fri, 23 Feb 2024 16:00:00 -0800", rss)
+        self.assertIn(
+            "Songs: Angra - Wuthering Heights, John Sinclair - Ain’t Nobody’s Business, Kylie Minogue - Love at First Sight",
+            rss,
+        )
+        self.assertNotIn("evil.example", rss)
+        self.assertNotIn("Squarespace", rss)
+
+    def test_neon_shrines_recipe_is_bounded_to_its_page(self) -> None:
+        self.assertIs(webpage_recipe_for_url("https://www.osghpress.com/neon-shrines"), OSGH_NEON_SHRINES_RECIPE)
+        self.assertIs(webpage_recipe_for_url("https://hydefm.com/archives/"), HYDEFM_ARCHIVE_RECIPE)
+        for unsupported_url in (
+            "https://www.osghpress.com/paper-shrines",
+            "https://www.osghpress.com/neon-shrines?format=json",
+            "https://osghpress.com.evil.example/neon-shrines",
+            "http://www.osghpress.com/neon-shrines",
+        ):
+            with self.subTest(url=unsupported_url):
+                with self.assertRaises(ValueError):
+                    recipe_fetch_url(OSGH_NEON_SHRINES_RECIPE, unsupported_url)
 
 
 if __name__ == "__main__":

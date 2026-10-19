@@ -6,6 +6,10 @@ Notable changes per release. The [GitHub releases](https://github.com/spkerber/n
 
 ## Unreleased
 
+### Added
+
+- A second webpage recipe, for the NEON SHRINES radio show page at `https://www.osghpress.com/neon-shrines`, which publishes no native feed (Squarespace's `?format=rss` returns 400 for it). An episode's identity is its air date rather than its title, so an edited title does not bring an episode back as unread. Episodes are listed newest first: the page lists each season's episodes oldest first, and the hosted bridge keeps only the first 50 items by default, so page order would drop the newest episodes of a long season. A Google Drive audio link is attached only when exactly one sits inside an episode's own block, because the page sometimes stacks a whole season's buttons under its last episode and guessing would point an episode at the wrong recording. Air dates are read as Pacific, with the show's 4pm slot assumed when no time is listed.
+
 ### Fixed
 
 - Retitling an existing generated source no longer orphans its feed. `subscribe-bandcamp-source --title` derives the source ID from the title, but a source already in the registry keeps its stored ID when it merges, so the RSS was written under a name the registry never pointed at. The hosted bridge seeds and serves strictly by ID, which made this quiet rather than loud: the served feed went on returning the old title, and the cache prune deleted the newly written file for not matching any active source ID. The ID is now settled against the registry before anything is written, so the generated file and `feed_url` stay pinned to `<source_id>.rss`. The same ordering fixes a new source whose slug collides with an existing one, where the file was written under the base name before the merge appended the `-2` suffix.
