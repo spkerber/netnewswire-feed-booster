@@ -11,6 +11,7 @@ from netnewswire_feed_booster.webpage_feeds import (
 )
 from netnewswire_feed_booster.webpage_recipes import (
     HYDEFM_ARCHIVE_RECIPE,
+    MAILCHIMP_ENGINEERING_BLOG_RECIPE,
     OSGH_NEON_SHRINES_RECIPE,
     webpage_recipe_for_url,
 )
@@ -65,6 +66,19 @@ NEON_SHRINES_HTML = f"""
 <div class="sqs-block-button"><a href="https://evil.example/file/d/1HAlovPgl0dzmE0EaTAtX1Xi3zD8njP06/view">Download</a></div>
 <div class="sqs-html-content" data-sqsp-text-block-content><h2 style="white-space:pre-wrap;">Goodbye Neon Shrines Vol. 4</h2><p class="" style="white-space:pre-wrap;">October 11, 2024</p><p class="" data-rte-preserve-empty="true" style="white-space:pre-wrap;"></p></div>
 <footer class="sections" id="footer-sections" data-footer-sections><section data-test="page-section"><div class="sqs-html-content"><p><span class="sqsrte-text-color--lightAccent">Made with </span><a href="http://squarespace.com" target="_blank"><span class="sqsrte-text-color--lightAccent">Squarespace</span></a></p><p><a href="mailto:email@example.com?" target="_blank">Email </a></p><p><span class="sqsrte-text-color--lightAccent">Copyright. All rights reserved.</span></p></div></section></footer>
+"""
+
+
+# Shapes copied from the live blog index (October 2026), trimmed to three posts:
+# the filter buttons that reuse the card badge class, then day groups of cards.
+# The off-site card is added to prove a link outside the blog is dropped.
+MAILCHIMP_BLOG_HTML = """
+<div class="fern-changelog-filters"><button class="fern-docs-badge large grayscale outlined interactive fern-filter-badge fern-filter-badge-selected">All</button><button class="fern-docs-badge large grayscale outlined-subtle interactive fern-filter-badge fern-filter-badge-unselected">Transactional</button><button class="fern-docs-badge large grayscale outlined-subtle interactive fern-filter-badge fern-filter-badge-unselected">Engineering</button></div>
+<div class="fern-changelog-timeline">
+<div class="fern-changelog-day-group"><time class="fern-changelog-day" dateTime="2025-06-10T00:00:00.000Z">Jun 10, 2025</time><div class="fern-changelog-day-entries"><div class="fern-changelog-card"><span class="fern-changelog-card-marker" aria-hidden="true"></span><div class="fern-changelog-card-body"><h3 class="fern-changelog-card-title"><a data-astro-prefetch="viewport" href="/developer/blog/reintroducing-mailchimp-transactional-for-your-email-and-sms-needs" class="fern-changelog-card-link">Reintroducing Mailchimp Transactional for your Email and SMS needs</a></h3><p class="fern-changelog-card-excerpt">A New Era for Mailchimp Transactional: Get Ready to Build Faster.</p><div class="fern-changelog-card-tags"><span class="fern-docs-badge small grayscale subtle">Transactional</span></div></div></div></div></div>
+<div class="fern-changelog-day-group"><time class="fern-changelog-day" dateTime="2022-03-15T00:00:00.000Z">Mar 15, 2022</time><div class="fern-changelog-day-entries"><div class="fern-changelog-card"><span class="fern-changelog-card-marker" aria-hidden="true"></span><div class="fern-changelog-card-body"><h3 class="fern-changelog-card-title"><a data-astro-prefetch="viewport" href="/developer/blog/mailchimp-and-wordpress" class="fern-changelog-card-link">Mailchimp and WordPress</a></h3><p class="fern-changelog-card-excerpt">Bridging the Gap with Gravity Forms</p><div class="fern-changelog-card-tags"><span class="fern-docs-badge small grayscale subtle">Integrations</span></div></div></div><div class="fern-changelog-card"><div class="fern-changelog-card-body"><h3 class="fern-changelog-card-title"><a href="https://evil.example/developer/blog/phish" class="fern-changelog-card-link">Totally Real Post</a></h3></div></div></div></div>
+<div class="fern-changelog-day-group"><time class="fern-changelog-day" dateTime="2021-11-16T00:00:00.000Z">Nov 16, 2021</time><div class="fern-changelog-day-entries"><div class="fern-changelog-card"><span class="fern-changelog-card-marker" aria-hidden="true"></span><div class="fern-changelog-card-body"><h3 class="fern-changelog-card-title"><a data-astro-prefetch="viewport" href="/developer/blog/leading-teams-closing-loops" class="fern-changelog-card-link">Leading Teams and Closing Loops</a></h3><p class="fern-changelog-card-excerpt">Your work isn’t solely defined by the PRs you push out</p><div class="fern-changelog-card-tags"><span class="fern-docs-badge small grayscale subtle">Culture</span><span class="fern-docs-badge small grayscale subtle">Engineering</span></div></div></div></div></div>
+</div>
 """
 
 
@@ -348,6 +362,57 @@ class WebpageFeedTests(unittest.TestCase):
             with self.subTest(url=unsupported_url):
                 with self.assertRaises(ValueError):
                     recipe_fetch_url(OSGH_NEON_SHRINES_RECIPE, unsupported_url)
+
+    def test_mailchimp_blog_recipe_reads_posts_dates_summaries_and_tags(self) -> None:
+        parsed = parse_webpage_feed(
+            MAILCHIMP_ENGINEERING_BLOG_RECIPE,
+            MAILCHIMP_BLOG_HTML,
+            MAILCHIMP_ENGINEERING_BLOG_RECIPE.default_url,
+        )
+
+        self.assertEqual(parsed.title, "Mailchimp Engineering")
+        self.assertEqual(
+            [(item.title, item.url, item.published_at) for item in parsed.items],
+            [
+                (
+                    "Reintroducing Mailchimp Transactional for your Email and SMS needs",
+                    "https://mailchimp.com/developer/blog/reintroducing-mailchimp-transactional-for-your-email-and-sms-needs",
+                    "2025-06-10T00:00:00.000Z",
+                ),
+                ("Mailchimp and WordPress", "https://mailchimp.com/developer/blog/mailchimp-and-wordpress", "2022-03-15T00:00:00.000Z"),
+                ("Leading Teams and Closing Loops", "https://mailchimp.com/developer/blog/leading-teams-closing-loops", "2021-11-16T00:00:00.000Z"),
+            ],
+        )
+        newest, _wordpress, culture = parsed.items
+        self.assertEqual(newest.details["Summary"], ["A New Era for Mailchimp Transactional: Get Ready to Build Faster."])
+        # The filter buttons above the timeline share the badge class but are not tags.
+        self.assertEqual(newest.details["Tags"], ["Transactional"])
+        self.assertEqual(culture.details["Tags"], ["Culture", "Engineering"])
+
+    def test_mailchimp_blog_rss_dates_posts_and_drops_off_site_links(self) -> None:
+        rss = render_webpage_feed_rss(
+            MAILCHIMP_ENGINEERING_BLOG_RECIPE,
+            MAILCHIMP_ENGINEERING_BLOG_RECIPE.default_url,
+            MAILCHIMP_BLOG_HTML,
+        )
+
+        self.assertIn("<title>Mailchimp Engineering</title>", rss)
+        self.assertIn("<pubDate>Tue, 10 Jun 2025 00:00:00 +0000</pubDate>", rss)
+        self.assertIn("Summary: Bridging the Gap with Gravity Forms", rss)
+        self.assertNotIn("evil.example", rss)
+        self.assertNotIn("Totally Real Post", rss)
+
+    def test_mailchimp_blog_recipe_is_bounded_to_the_blog(self) -> None:
+        self.assertIs(webpage_recipe_for_url("https://mailchimp.com/developer/blog/"), MAILCHIMP_ENGINEERING_BLOG_RECIPE)
+        for unsupported_url in (
+            "https://mailchimp.com/developer/",
+            "https://mailchimp.com/developer/blog/?tag=engineering",
+            "https://mailchimp.com.evil.example/developer/blog/",
+            "http://mailchimp.com/developer/blog/",
+        ):
+            with self.subTest(url=unsupported_url):
+                with self.assertRaises(ValueError):
+                    recipe_fetch_url(MAILCHIMP_ENGINEERING_BLOG_RECIPE, unsupported_url)
 
 
 if __name__ == "__main__":
