@@ -116,30 +116,18 @@ class ReleaseDateTests(unittest.TestCase):
             ["18 Sep 2026 00:00:00 GMT", "30 Jan 2026 09:18:53 GMT", ""],
         )
 
-    def test_a_failed_lookup_leaves_the_feed_undated_but_working(self) -> None:
-        items = parse_bandcamp_artist_music_html(ARTIST_LEGACY_GRID_PAGE, "https://fixture.bandcamp.com")
-        output = io.StringIO()
-
-        with redirect_stdout(output):
-            dated = add_bandcamp_release_dates(items, ARTIST_LEGACY_GRID_PAGE, RecordingPoster(error=ConnectionError("down")))
-
-        self.assertEqual(dated, items)
-        self.assertIn("release dates unavailable for band 900165621", output.getvalue())
-
-    def test_no_request_when_nothing_could_be_dated(self) -> None:
-        poster = RecordingPoster(ARTIST_DISCOGRAPHY)
-        no_keys = [item for item in parse_bandcamp_artist_music_html(ARTIST_LEGACY_GRID_PAGE, "https://fixture.bandcamp.com")]
-        for item in no_keys:
+        # No request at all when nothing could be dated: no release keys, or no band id.
+        unused = RecordingPoster(ARTIST_DISCOGRAPHY)
+        keyless = parse_bandcamp_artist_music_html(ARTIST_LEGACY_GRID_PAGE, "https://fixture.bandcamp.com")
+        for item in keyless:
             item.release_key = ""
-
-        add_bandcamp_release_dates(no_keys, ARTIST_LEGACY_GRID_PAGE, poster)
+        add_bandcamp_release_dates(keyless, ARTIST_LEGACY_GRID_PAGE, unused)
         add_bandcamp_release_dates(
             parse_bandcamp_artist_music_html(ARTIST_LEGACY_GRID_PAGE, "https://fixture.bandcamp.com"),
             "<html>no band id</html>",
-            poster,
+            unused,
         )
-
-        self.assertEqual(poster.band_ids, [])
+        self.assertEqual(unused.band_ids, [])
 
     def test_the_item_cap_keeps_the_newest_releases_once_dates_are_known(self) -> None:
         label = artist_source("https://label.bandcamp.com")
@@ -157,11 +145,12 @@ class ReleaseDateTests(unittest.TestCase):
         self.assertEqual([item.title for item in dated], ["Fixture Single", "Fixture Record"])
         self.assertEqual([item.title for item in page_order], ["Fixture Record", "Fixture Single"])
 
-    def test_undated_releases_keep_page_order_after_dated_ones(self) -> None:
+    def test_undated_releases_follow_dated_ones_and_a_failed_lookup_changes_nothing(self) -> None:
         label = artist_source("https://label.bandcamp.com")
+        output = io.StringIO()
 
         items = bandcamp_items_for_source(label, LABEL_CLIENT_ITEMS_PAGE, max_items=None, post_band_details=RecordingPoster(LABEL_DISCOGRAPHY))
-        with redirect_stdout(io.StringIO()):
+        with redirect_stdout(output):
             failed = bandcamp_items_for_source(
                 label,
                 LABEL_CLIENT_ITEMS_PAGE,
@@ -170,7 +159,10 @@ class ReleaseDateTests(unittest.TestCase):
             )
 
         self.assertEqual([item.title for item in items], ["Fixture Record", "Fixture Single", "Not In Discography"])
+        # A failed lookup leaves the feed working: page order, no dates, and a warning.
         self.assertEqual([item.title for item in failed], ["Fixture Record", "Fixture Single", "Not In Discography"])
+        self.assertEqual([item.collected_at for item in failed], ["", "", ""])
+        self.assertIn("release dates unavailable for band 24623638", output.getvalue())
 
     def test_rendered_feed_gets_pub_dates_only_when_a_lookup_is_passed(self) -> None:
         poster = RecordingPoster(ARTIST_DISCOGRAPHY)
