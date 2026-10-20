@@ -150,7 +150,188 @@ HYDEFM_ARCHIVE_RECIPE = WebpageFeedRecipe(
     format_published_at=format_month_day_year,
 )
 
-WEBPAGE_FEED_RECIPES = (HYDEFM_ARCHIVE_RECIPE,)
+
+_NEON_SHRINES_SEASON = re.compile(r"Season (\w+) of NEON SHRINES", re.IGNORECASE)
+_NEON_SHRINES_DATE = re.compile(r"^([A-Z][a-z]+ \d{1,2}, \d{4})(?:\s+(\d{1,2}:\d{2}\s*[ap]m))?\b", re.IGNORECASE)
+_NEON_SHRINES_SEASON_NUMBERS = {
+    "one": "1", "two": "2", "three": "3", "four": "4", "five": "5",
+    "six": "6", "seven": "7", "eight": "8", "nine": "9", "ten": "10",
+}
+# The page's pre-wrap text breaks song lists with long runs of spaces rather than
+# <br>. Two spaces also occur inside song names ("Gang of Four  - Damaged Goods"),
+# so only three or more count as a break.
+_NEON_SHRINES_LINE_GAP = re.compile(r"\s{3,}")
+
+
+class _NeonShrinesHTMLParser(HTMLParser):
+    """Flatten the Squarespace page into ordered heading, paragraph and Drive-link events."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.events: List[tuple] = []
+        self.capture_tag = ""
+        self.parts: List[str] = []
+        self.in_footer = False
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        if self.in_footer:
+            return
+        if tag == "footer":
+            # Everything after the last episode's block would otherwise be read as its text.
+            self.in_footer = True
+            self.capture_tag = ""
+            self.parts = []
+        elif tag in {"h1", "h2", "p"} and not self.capture_tag:
+            self.capture_tag = tag
+            self.parts = []
+        elif tag == "br" and self.capture_tag:
+            self.parts.append("\n")
+        elif tag == "a":
+            drive_url = _drive_file_url(str(dict(attrs).get("href") or ""))
+            if drive_url:
+                self.events.append(("a", drive_url))
+
+    def handle_startendtag(self, tag: str, attrs) -> None:
+        self.handle_starttag(tag, attrs)
+
+    def handle_data(self, data: str) -> None:
+        if self.capture_tag:
+            self.parts.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == self.capture_tag:
+            lines = [
+                " ".join(segment.split())
+                for line in "".join(self.parts).split("\n")
+                for segment in _NEON_SHRINES_LINE_GAP.split(line)
+            ]
+            lines = [line for line in lines if line]
+            if lines:
+                self.events.append((tag, lines))
+            self.capture_tag = ""
+            self.parts = []
+
+
+def parse_osgh_neon_shrines(html: str, site_url: str) -> ParsedWebpageFeed:
+    parser = _NeonShrinesHTMLParser()
+    parser.feed(html)
+
+    season = ""
+    episodes: List[dict] = []
+    current: Optional[dict] = None
+    for kind, value in parser.events:
+        if kind == "h1":
+            match = _NEON_SHRINES_SEASON.fullmatch(" ".join(value))
+            if match:
+                season = _NEON_SHRINES_SEASON_NUMBERS.get(match.group(1).lower(), match.group(1).lower())
+                current = None
+        elif kind == "h2":
+            current = {"season": season, "title": " ".join(value), "date": "", "aired": None, "about": [], "songs": [], "links": [], "in_songs": False}
+            episodes.append(current)
+        elif kind == "p" and current is not None:
+            text = " ".join(value)
+            date_match = _NEON_SHRINES_DATE.match(text) if current["aired"] is None else None
+            aired = _neon_shrines_aired(date_match) if date_match else None
+            if aired is not None:
+                current["date"] = date_match.group(0)
+                current["aired"] = aired
+            elif text.lower().startswith("songs:"):
+                current["in_songs"] = True
+                first_line = value[0][len("songs:"):].strip()
+                current["songs"].extend(([first_line] if first_line else []) + value[1:])
+            elif current["in_songs"]:
+                current["songs"].extend(value)
+            else:
+                current["about"].append(text)
+        elif kind == "a" and current is not None:
+            current["links"].append(value)
+
+    dated_items: List[tuple] = []
+    seen_ids: set = set()
+    for episode in episodes:
+        if episode["aired"] is None:
+            continue
+        # The air date is the identity: titles get edited (typos, guest names), and a
+        # new identity would make NetNewsWire show the episode again as unread.
+        episode_id = episode["aired"].date().isoformat()
+        if episode_id in seen_ids:
+            slug = re.sub(r"[^a-z0-9]+", "-", episode["title"].lower()).strip("-")[:80]
+            episode_id = f"{episode_id}-{slug}"
+        if episode_id in seen_ids:
+            continue
+        seen_ids.add(episode_id)
+        item_url = f"https://www.osghpress.com/neon-shrines?episode={episode_id}"
+        title = episode["title"]
+        if episode["season"]:
+            title = f"S{episode['season']} {title}"
+        details = {"Aired": [episode["date"]]}
+        if episode["about"]:
+            details["About"] = [" ".join(episode["about"])]
+        if episode["songs"]:
+            details["Songs"] = episode["songs"]
+        # Only one Drive link inside an episode's own span maps to it with certainty;
+        # Squarespace sometimes stacks a whole season's buttons under the last episode.
+        if len(episode["links"]) == 1:
+            details["Audio"] = episode["links"]
+        item = WebpageFeedItem(title=title, url=item_url, published_at=episode["date"], details=details)
+        dated_items.append((episode["aired"], item))
+
+    if not dated_items:
+        raise ValueError(f"Could not find NEON SHRINES episodes for {site_url}")
+    # The page lists seasons newest first but each season's episodes oldest first.
+    # The hosted bridge keeps only the first N items, so put the newest first.
+    dated_items.sort(key=lambda entry: entry[0], reverse=True)
+    return ParsedWebpageFeed(
+        title="NEON SHRINES",
+        description=f"Episodes of NEON SHRINES, the OSGH radio show, generated from {site_url}.",
+        items=tuple(item for _aired, item in dated_items),
+    )
+
+
+def _neon_shrines_aired(match: re.Match) -> Optional[datetime]:
+    """Air dates are Pacific; episodes without a listed time aired in the 4pm slot."""
+    from zoneinfo import ZoneInfo
+
+    clock = (match.group(2) or "4:00pm").replace(" ", "").upper()
+    try:
+        aired = datetime.strptime(f"{match.group(1)} {clock}", "%B %d, %Y %I:%M%p")
+    except ValueError:
+        # The pattern also fits text like "Volume 2, 2024", which is not a date.
+        return None
+    return aired.replace(tzinfo=ZoneInfo("America/Los_Angeles"))
+
+
+def format_neon_shrines_airdate(value: str) -> str:
+    match = _NEON_SHRINES_DATE.match(value.strip())
+    aired = _neon_shrines_aired(match) if match else None
+    if aired is None:
+        raise ValueError(f"Unrecognized NEON SHRINES date: {value}")
+    return format_datetime(aired)
+
+
+def _drive_file_url(value: str) -> str:
+    parsed = urlparse((value or "").strip())
+    match = re.fullmatch(r"/file/d/([A-Za-z0-9_-]{10,})/view", parsed.path or "")
+    if parsed.scheme != "https" or (parsed.hostname or "").lower() != "drive.google.com" or not match:
+        return ""
+    return f"https://drive.google.com/file/d/{match.group(1)}/view"
+
+
+OSGH_NEON_SHRINES_RECIPE = WebpageFeedRecipe(
+    id="osgh-neon-shrines",
+    name="NEON SHRINES",
+    default_url="https://www.osghpress.com/neon-shrines",
+    source_id_prefix="radio",
+    allowed_site_hosts=frozenset({"osghpress.com", "www.osghpress.com"}),
+    allowed_path_prefixes=("/neon-shrines",),
+    allowed_fetch_hosts=frozenset({"osghpress.com", "www.osghpress.com"}),
+    allowed_item_hosts=frozenset({"www.osghpress.com"}),
+    allowed_image_hosts=frozenset(),
+    parse=parse_osgh_neon_shrines,
+    format_published_at=format_neon_shrines_airdate,
+)
+
+WEBPAGE_FEED_RECIPES = (HYDEFM_ARCHIVE_RECIPE, OSGH_NEON_SHRINES_RECIPE)
 
 
 def webpage_recipe_for_url(site_url: str) -> Optional[WebpageFeedRecipe]:
