@@ -34,6 +34,8 @@ Capacity per route is:
 
 The defaults support up to 240 Bandcamp sources and 240 other generated sources within each 12-hour target window. The routes are separate, so 100 Bandcamp sources and 20 Mixcloud/NTS sources do not compete for the same batch.
 
+A route over capacity still reaches every source. Each run takes the sources that have waited longest, so the cycle stretches to the first-pass time `refresh-plan` reports instead of skipping the end of the list. The refresh interval is a minimum gap, not a speed: raising it reduces upstream checks but never makes an over-capacity route cycle faster, and because both routes share it, it slows the smaller route too.
+
 Check a real profile before deploying:
 
 ```bash
