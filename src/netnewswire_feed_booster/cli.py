@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 from .bandcamp import (
+    post_bandcamp_band_details,
     write_bandcamp_collection_rss,
 )
 from .batch_subscribe import (
@@ -1221,6 +1222,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                         fan_max_items=args.fan_max_items,
                         full_fan_source_ids=full_fan_source_ids,
                         max_items=args.max_items,
+                        post_band_details=post_bandcamp_band_details,
                     )
                     if not items:
                         failed += 1
@@ -1343,6 +1345,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                 fan_max_items=args.fan_max_items,
                 full_fan_source_ids=set(),
                 max_items=args.max_items,
+                post_band_details=post_bandcamp_band_details,
             )
             out_path = args.out_dir / f"{source.id}.rss"
             out_path.parent.mkdir(parents=True, exist_ok=True)

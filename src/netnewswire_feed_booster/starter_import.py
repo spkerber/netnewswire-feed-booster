@@ -12,6 +12,7 @@ from typing import Any, Dict, Iterable, List
 from .feed_store import Source, validate_profile_id
 from .feed_validation import validate_feed_text
 from .generated_adapters import BANDCAMP_ADAPTER
+from .bandcamp import post_bandcamp_band_details
 from .hosted_bandcamp import render_bandcamp_source_rss
 from .http_client import fetch_text
 from .opml import render_opml
@@ -104,6 +105,7 @@ def build_starter_import(
                     allowed_hosts=BANDCAMP_ADAPTER.allowed_hosts_for(source),
                     allowed_suffixes=BANDCAMP_ADAPTER.allowed_suffixes_for(source),
                 ),
+                post_band_details=post_bandcamp_band_details,
             )
             validate_feed_text(rss)
             generated_rss[spec["id"]] = rss
