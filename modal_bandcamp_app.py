@@ -250,18 +250,42 @@ def _refresh_state_path(source_id: str) -> Path:
     return REFRESH_STATE_DIR / f"{validate_source_id(source_id)}.json"
 
 
+def _read_refresh_state(source_id: str):
+    from netnewswire_feed_booster.bridge_health import RefreshState, parse_refresh_state
+
+    try:
+        return parse_refresh_state(_refresh_state_path(source_id).read_text(encoding="utf-8"))
+    except (FileNotFoundError, ValueError):
+        return RefreshState()
+
+
 def _last_refresh_attempt(source_id: str) -> Optional[float]:
     """None when the source has no readable attempt yet, so it is refreshed first."""
-    try:
-        state = json.loads(_refresh_state_path(source_id).read_text(encoding="utf-8"))
-        return float(state["last_attempt"])
-    except (FileNotFoundError, KeyError, TypeError, ValueError, json.JSONDecodeError):
-        return None
+    return _read_refresh_state(source_id).last_attempt
 
 
-def _mark_refresh_attempt(source_id: str, now: float) -> None:
+def _record_refresh(source_id: str, now: float, error: Optional[BaseException] = None) -> None:
+    from netnewswire_feed_booster.bridge_health import dump_refresh_state, record_refresh
+
     REFRESH_STATE_DIR.mkdir(parents=True, exist_ok=True)
-    _refresh_state_path(source_id).write_text(json.dumps({"last_attempt": now}), encoding="utf-8")
+    state = record_refresh(_read_refresh_state(source_id), now, error)
+    _refresh_state_path(source_id).write_text(dump_refresh_state(state), encoding="utf-8")
+
+
+def _bridge_health_text() -> str:
+    from netnewswire_feed_booster.bridge_health import format_bridge_health, parse_refresh_state, summarize_bridge_health
+
+    _reload_cache_volume()
+    source_ids = {source.id for source in _active_sources_for_route("generated")}
+    states = {}
+    if REFRESH_STATE_DIR.exists():
+        for path in REFRESH_STATE_DIR.glob("*.json"):
+            if path.stem in source_ids:
+                states[path.stem] = parse_refresh_state(path.read_text(encoding="utf-8"))
+    cached = {path.stem: path.stat().st_mtime for path in CACHE_DIR.glob("*.rss")} if CACHE_DIR.exists() else {}
+    seeded = {path.stem for path in SEED_DIR.glob("*.rss")} if SEED_DIR.exists() else set()
+    health = summarize_bridge_health(source_ids, states, cached, seeded, time.time(), REFRESH_INTERVAL_SECONDS)
+    return format_bridge_health(health)
 
 
 def _active_generated_source_ids() -> set[str]:
@@ -350,6 +374,14 @@ def web():
 
         return Response(content=rss, media_type="application/rss+xml; charset=utf-8", headers={"Cache-Control": READER_CACHE_CONTROL})
 
+    @web_app.get("/feeds/{feed_token}/health")
+    def bridge_health(feed_token: str):
+        # Behind the feed token: the report lists source IDs, which name subscriptions.
+        # It reads only the cache volume and never fetches upstream.
+        if not _token_is_valid(feed_token):
+            raise HTTPException(status_code=404, detail="Unknown feed")
+        return PlainTextResponse(_bridge_health_text(), headers={"Cache-Control": "no-store"})
+
     @web_app.get("/")
     def index():
         return PlainTextResponse("RSS feed bridge\n")
@@ -402,15 +434,18 @@ def _refresh_due_sources(sources, refresh_source, prune_retired: bool = False) -
         REFRESH_INTERVAL_SECONDS,
         MAX_REFRESH_SOURCES_PER_RUN,
     ):
+        outcome: Optional[BaseException] = None
         try:
             refresh_source(source)
             refreshed += 1
         except Exception as error:
+            outcome = error
             failed += 1
             failures.append({"source_id": source.id, "error": f"{type(error).__name__}: {error}"})
-        finally:
-            _mark_refresh_attempt(source.id, now)
-            attempted += 1
+        # The outcome, not just the attempt, is kept so the health route can
+        # show a source that keeps failing while it serves an old copy.
+        _record_refresh(source.id, now, outcome)
+        attempted += 1
         time.sleep(REFRESH_PAUSE_SECONDS)
 
     if attempted or pruned:
