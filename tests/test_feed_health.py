@@ -137,6 +137,8 @@ class ClassificationTests(unittest.TestCase):
             "json-feed": OK,
         }
         self.assertEqual({source_id: health.status for source_id, health in results.items()}, expected)
+        # An empty feed is not proof a source is dead, so it is never a problem.
+        self.assertFalse(results["empty-artist"].is_problem)
         self.assertIn("www.artist.example", results["redirected-away"].detail)
         self.assertEqual(results["terminated"].detail, "YouTube: This account has been terminated for violating Google's Terms of Service.")
         self.assertEqual(results["atom-channel"].platform, "YouTube")
@@ -166,6 +168,9 @@ class ClassificationTests(unittest.TestCase):
         # The channel page is checked only on the retry, once per failing feed.
         self.assertEqual(fetch.calls.count("https://www.youtube.com/channel/UC404"), 1)
         self.assertEqual(fetch.calls.count("https://www.youtube.com/feeds/videos.xml?channel_id=UC404"), 2)
+        summary = format_summary(list(results.values()))
+        self.assertIn("Problems (0):", summary)
+        self.assertIn("Temporarily unavailable; the source still exists, check again later (2):", summary)
 
     def test_a_redirect_to_an_unsafe_address_is_reported_as_not_followed(self) -> None:
         results, _fetch = self.check(
@@ -175,15 +180,6 @@ class ClassificationTests(unittest.TestCase):
 
         self.assertEqual(results["artist-site"].status, NOT_A_FEED)
         self.assertEqual(results["artist-site"].detail, "redirects to http://www.artist.example, which is not followed")
-
-    def test_an_empty_feed_is_not_a_problem(self) -> None:
-        results, _fetch = self.check(
-            [source("empty-artist", "https://feeds.soundcloud.com/users/1/sounds.rss")],
-            {"https://feeds.soundcloud.com/users/1/sounds.rss": FetchResult(200, "https://feeds.soundcloud.com/users/1/sounds.rss", body=rss())},
-        )
-
-        self.assertEqual(results["empty-artist"].status, EMPTY)
-        self.assertFalse(results["empty-artist"].is_problem)
 
     def test_a_working_feed_reached_through_a_redirect_gets_a_suggested_address(self) -> None:
         results, _fetch = self.check(
@@ -303,32 +299,12 @@ class OutputTests(unittest.TestCase):
         self.assertNotIn("another-secret", redacted)
         self.assertIn("404.feed.example", redacted)
         self.assertIn("moved.example -> new-home.example", redacted)
+        # On the same host, the redacted text says what changed instead of repeating the host.
+        self.assertEqual(describe_move("http://feeds.example/show", "https://feeds.example/show"), "http://feeds.example -> https://feeds.example")
+        self.assertEqual(describe_move("https://feeds.example/old", "https://feeds.example/new"), "feeds.example (new path)")
         self.assertIn("Skipped 3 generated feeds", redacted)
         self.assertIn("s3cret-token", shown)
         self.assertIn("Nothing was changed.", redacted)
-
-    def test_moves_on_the_same_host_say_what_changed(self) -> None:
-        self.assertEqual(describe_move("http://feeds.example/show", "https://feeds.example/show"), "http://feeds.example -> https://feeds.example")
-        self.assertEqual(describe_move("https://feeds.example/old", "https://feeds.example/new"), "feeds.example (new path)")
-        self.assertEqual(describe_move("https://a.example/feed", "https://b.example/feed"), "a.example -> b.example")
-
-    def test_unavailable_feeds_are_listed_apart_from_problems(self) -> None:
-        responses = {
-            "https://www.youtube.com/feeds/videos.xml?channel_id=UC9": FetchResult(404),
-            "https://www.youtube.com/channel/UC9": FetchResult(200, "https://www.youtube.com/channel/UC9", body=LIVE_CHANNEL_PAGE),
-        }
-        results = check_feeds(
-            [source("busy-channel", "https://www.youtube.com/feeds/videos.xml?channel_id=UC9", kind="youtube")],
-            fetch=FakeFetcher(responses),
-            now=NOW,
-            pause_seconds=0,
-            retry_delay_seconds=0,
-        )
-
-        summary = format_summary(results)
-
-        self.assertIn("Problems (0):", summary)
-        self.assertIn("Temporarily unavailable; the source still exists, check again later (1):", summary)
 
     def test_report_lists_every_category_without_secrets(self) -> None:
         with TemporaryDirectory() as tmp_dir:
