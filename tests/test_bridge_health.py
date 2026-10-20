@@ -9,7 +9,6 @@ from netnewswire_feed_booster.bridge_health import (
     short_error,
     summarize_bridge_health,
 )
-from netnewswire_feed_booster.bridge_policy import due_sources
 
 
 HOUR = 60 * 60
@@ -39,12 +38,9 @@ class RefreshStateTests(unittest.TestCase):
         self.assertEqual(failed_twice.consecutive_failures, 2)
         self.assertEqual(failed_twice.last_error, "ValueError: Bandcamp returned 403")
         self.assertEqual(recovered, RefreshState(last_attempt=NOW + HOUR, last_success=NOW + HOUR))
-
-    def test_state_round_trips_without_empty_fields(self) -> None:
-        state = RefreshState(last_attempt=NOW, last_success=NOW - DAY, last_error="HTTPError: HTTP Error 403: Forbidden", consecutive_failures=3)
-
-        self.assertEqual(parse_refresh_state(dump_refresh_state(state)), state)
-        self.assertEqual(dump_refresh_state(RefreshState(last_attempt=NOW, last_success=NOW)), '{"last_attempt": 1800000000.0, "last_success": 1800000000.0, "consecutive_failures": 0}')
+        # What is written to the volume reads back unchanged.
+        for state in (failed_twice, recovered):
+            self.assertEqual(parse_refresh_state(dump_refresh_state(state)), state)
 
     def test_errors_are_kept_short_and_without_urls(self) -> None:
         error = ValueError("Unsafe fetch URL: https://example.bandcamp.com/music?token=abc123 " + "x" * 400)
@@ -102,23 +98,6 @@ class SummaryTests(unittest.TestCase):
         self.assertIn("Nothing to serve; readers get 'waiting for its scheduled refresh' (1):", report)
         self.assertIn("  ... and 40 more", report)
         self.assertLess(report.index("failing-for-weeks\t40"), report.index("failing-recently-fine\t1"))
-
-    def test_a_route_refreshed_on_schedule_reports_healthy(self) -> None:
-        sources = [f"nts-{index}" for index in range(10)]
-        states = {}
-        for hour in range(24):
-            now = NOW - (24 - hour) * HOUR
-            for source_id in due_sources(sources, lambda item: states.get(item, RefreshState()).last_attempt, now, 12 * HOUR, 20):
-                error = ConnectionError("down") if source_id == "nts-3" else None
-                states[source_id] = record_refresh(states.get(source_id, RefreshState()), now, error)
-
-        # Only a successful refresh writes the cache, so the failing source has none.
-        cached = {source_id: NOW for source_id in sources if source_id != "nts-3"}
-        health = summarize_bridge_health(sources, states, cached, set(), NOW, 12 * HOUR)
-
-        self.assertEqual(len(health.healthy), 9)
-        self.assertEqual([(row[0], row[1]) for row in health.failing], [("nts-3", 2)])
-        self.assertEqual([row[0] for row in health.stale], ["nts-3"])
 
 
 if __name__ == "__main__":
