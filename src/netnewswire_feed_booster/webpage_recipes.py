@@ -5,8 +5,9 @@ from datetime import datetime, timezone
 from email.utils import format_datetime
 from html.parser import HTMLParser
 from typing import List, Optional
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
+from .rss_safety import parse_internet_date
 from .webpage_feeds import ParsedWebpageFeed, WebpageFeedItem, WebpageFeedRecipe
 
 
@@ -331,7 +332,124 @@ OSGH_NEON_SHRINES_RECIPE = WebpageFeedRecipe(
     format_published_at=format_neon_shrines_airdate,
 )
 
-WEBPAGE_FEED_RECIPES = (HYDEFM_ARCHIVE_RECIPE, OSGH_NEON_SHRINES_RECIPE)
+class _MailchimpBlogHTMLParser(HTMLParser):
+    """Read the blog index's changelog timeline: dated day groups of post cards."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.entries: List[dict] = []
+        self.day = ""
+        self.capture = ""
+        self.parts: List[str] = []
+        self.tags_depth = 0
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        attributes = dict(attrs)
+        classes = set(str(attributes.get("class") or "").split())
+        if tag == "time" and "fern-changelog-day" in classes:
+            self.day = str(attributes.get("datetime") or "")
+        elif tag == "a" and "fern-changelog-card-link" in classes:
+            self.entries.append({"date": self.day, "href": str(attributes.get("href") or ""), "title": "", "excerpt": "", "tags": []})
+            self._start("title")
+        elif tag == "p" and "fern-changelog-card-excerpt" in classes and self.entries:
+            self._start("excerpt")
+        elif tag == "div":
+            if self.tags_depth:
+                self.tags_depth += 1
+            elif "fern-changelog-card-tags" in classes:
+                self.tags_depth = 1
+        # The filter buttons above the timeline use the same badge class, so only
+        # badges inside a card's tag row count.
+        elif tag == "span" and self.tags_depth and "fern-docs-badge" in classes and self.entries:
+            self._start("tag")
+
+    def handle_data(self, data: str) -> None:
+        if self.capture:
+            self.parts.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "div" and self.tags_depth:
+            self.tags_depth -= 1
+            return
+        closing = {"title": "a", "excerpt": "p", "tag": "span"}.get(self.capture)
+        if tag != closing:
+            return
+        text = " ".join("".join(self.parts).split())
+        if text:
+            if self.capture == "tag":
+                self.entries[-1]["tags"].append(text)
+            else:
+                self.entries[-1][self.capture] = text
+        self.capture = ""
+        self.parts = []
+
+    def _start(self, capture: str) -> None:
+        self.capture = capture
+        self.parts = []
+
+
+def parse_mailchimp_engineering_blog(html: str, site_url: str) -> ParsedWebpageFeed:
+    parser = _MailchimpBlogHTMLParser()
+    parser.feed(html)
+
+    items: List[WebpageFeedItem] = []
+    seen_urls: set = set()
+    for entry in parser.entries:
+        url = _mailchimp_post_url(entry["href"])
+        if not url or not entry["title"] or url in seen_urls:
+            continue
+        seen_urls.add(url)
+        try:
+            published_at = entry["date"] if entry["date"] and parse_internet_date(entry["date"]) else ""
+        except ValueError:
+            published_at = ""
+        details = {}
+        if entry["excerpt"]:
+            details["Summary"] = [entry["excerpt"]]
+        if entry["tags"]:
+            details["Tags"] = list(dict.fromkeys(entry["tags"]))
+        items.append(WebpageFeedItem(title=entry["title"], url=url, published_at=published_at, details=details))
+
+    if not items:
+        raise ValueError(f"Could not find Mailchimp Engineering posts for {site_url}")
+    return ParsedWebpageFeed(
+        title="Mailchimp Engineering",
+        description=f"Posts from the Mailchimp Engineering blog, generated from {site_url}.",
+        items=tuple(items),
+    )
+
+
+def _mailchimp_post_url(href: str) -> str:
+    parsed = urlparse(urljoin("https://mailchimp.com/developer/blog/", (href or "").strip()))
+    prefix = "/developer/blog/"
+    slug = parsed.path[len(prefix):].strip("/") if parsed.path.startswith(prefix) else ""
+    if (
+        parsed.scheme != "https"
+        or (parsed.hostname or "").lower() not in {"mailchimp.com", "www.mailchimp.com"}
+        or not re.fullmatch(r"[a-z0-9-]+", slug)
+        or parsed.query
+        or parsed.fragment
+    ):
+        return ""
+    return f"https://mailchimp.com{prefix}{slug}"
+
+
+# Mailchimp removed the blog's own RSS feed (rss.xml returns 404) in 2026; the
+# index page still lists every post with its date.
+MAILCHIMP_ENGINEERING_BLOG_RECIPE = WebpageFeedRecipe(
+    id="mailchimp-engineering-blog",
+    name="Mailchimp Engineering",
+    default_url="https://mailchimp.com/developer/blog/",
+    source_id_prefix="blog",
+    allowed_site_hosts=frozenset({"mailchimp.com", "www.mailchimp.com"}),
+    allowed_path_prefixes=("/developer/blog",),
+    allowed_fetch_hosts=frozenset({"mailchimp.com", "www.mailchimp.com"}),
+    allowed_item_hosts=frozenset({"mailchimp.com"}),
+    allowed_image_hosts=frozenset(),
+    parse=parse_mailchimp_engineering_blog,
+)
+
+WEBPAGE_FEED_RECIPES = (HYDEFM_ARCHIVE_RECIPE, OSGH_NEON_SHRINES_RECIPE, MAILCHIMP_ENGINEERING_BLOG_RECIPE)
 
 
 def webpage_recipe_for_url(site_url: str) -> Optional[WebpageFeedRecipe]:

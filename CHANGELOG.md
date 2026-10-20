@@ -9,6 +9,7 @@ Notable changes per release. The [GitHub releases](https://github.com/spkerber/n
 ### Added
 
 - A second webpage recipe, for the NEON SHRINES radio show page at `https://www.osghpress.com/neon-shrines`, which publishes no native feed (Squarespace's `?format=rss` returns 400 for it). An episode's identity is its air date rather than its title, so an edited title does not bring an episode back as unread. Episodes are listed newest first: the page lists each season's episodes oldest first, and the hosted bridge keeps only the first 50 items by default, so page order would drop the newest episodes of a long season. A Google Drive audio link is attached only when exactly one sits inside an episode's own block, because the page sometimes stacks a whole season's buttons under its last episode and guessing would point an episode at the wrong recording. Air dates are read as Pacific, with the show's 4pm slot assumed when no time is listed.
+- A webpage recipe for the Mailchimp Engineering blog at `https://mailchimp.com/developer/blog/`, whose own RSS feed (`rss.xml`) now returns 404. The index page still lists every post with its date, summary, and tags, so the recipe reads them from there. Only the tag badges inside a post card count; the filter buttons above the list use the same badge style. Post links are accepted only under `mailchimp.com/developer/blog/`.
 
 ### Fixed
 
