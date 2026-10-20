@@ -27,6 +27,7 @@ data/subscription-history.*.json
 data/profiles.*.json
 data/*.backup-*
 logs/
+tmp/
 !imports/.gitkeep
 !exports/.gitkeep
 !exports/generated/
