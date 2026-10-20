@@ -20,10 +20,13 @@ from netnewswire_feed_booster.feed_health import (
     QUIET_1Y,
     QUIET_2Y,
     REFUSED,
+    REDIRECT_NOT_FOLLOWED,
     SERVER_ERROR,
+    UNAVAILABLE,
     UNDATED,
     FetchResult,
     check_feeds,
+    describe_move,
     fetch_for_health,
     format_summary,
     write_report,
@@ -50,6 +53,8 @@ RDF = (
 )
 JSON_FEED = b'{"version": "https://jsonfeed.org/version/1.1", "title": "J", "items": [{"id": "1", "date_published": "2026-10-01T00:00:00Z"}]}'
 HTML = b"<!doctype html><html><head><title>Artist</title></head><body>Hi</body></html>"
+TERMINATED_CHANNEL_PAGE = b'<html>{"text":"This account has been terminated for violating Google\'s Terms of Service."}</html>'
+LIVE_CHANNEL_PAGE = b'<html>{"channelMetadataRenderer":{"title":"Live Artist"}}</html>'
 
 
 def source(source_id: str, url: str, kind: str = "website") -> Source:
@@ -72,7 +77,7 @@ class FakeFetcher:
 class ClassificationTests(unittest.TestCase):
     def check(self, sources, responses):
         fetch = FakeFetcher(responses)
-        results = check_feeds(sources, fetch=fetch, now=NOW, pause_seconds=0)
+        results = check_feeds(sources, fetch=fetch, now=NOW, pause_seconds=0, retry_delay_seconds=0)
         return {health.source_id: health for health in results}, fetch
 
     def test_each_outcome_gets_its_own_status(self) -> None:
@@ -100,6 +105,7 @@ class ClassificationTests(unittest.TestCase):
             "https://d.example/feed": FetchResult(200, "https://d.example/feed", body=b'<rss version="2.0"><channel><title>x</title><item><title>a</title></item></channel></rss>'),
             "https://feeds.soundcloud.com/users/1/sounds.rss": FetchResult(200, "https://feeds.soundcloud.com/users/1/sounds.rss", body=rss()),
             "https://www.youtube.com/feeds/videos.xml?channel_id=UC1": FetchResult(404, body=b"Not Found"),
+            "https://www.youtube.com/channel/UC1": FetchResult(200, "https://www.youtube.com/channel/UC1", body=TERMINATED_CHANNEL_PAGE),
             "https://e.example/feed": FetchResult(403, headers={"cf-mitigated": "challenge"}, body=b"<html><head><title>Just a moment...</title>"),
             "https://closed.substack.com/feed": FetchResult(400, body=b"This publication is invite-only"),
             "https://f.example/feed": FetchResult(429),
@@ -132,10 +138,43 @@ class ClassificationTests(unittest.TestCase):
         }
         self.assertEqual({source_id: health.status for source_id, health in results.items()}, expected)
         self.assertIn("www.artist.example", results["redirected-away"].detail)
+        self.assertEqual(results["terminated"].detail, "YouTube: This account has been terminated for violating Google's Terms of Service.")
         self.assertEqual(results["atom-channel"].platform, "YouTube")
         self.assertEqual(results["closed"].platform, "Substack")
         self.assertEqual(results["empty-artist"].platform, "SoundCloud")
         self.assertEqual(results["fresh"].newest, datetime(2026, 10, 14, 10, 0, tzinfo=timezone.utc))
+
+    def test_a_youtube_feed_that_fails_while_its_channel_lives_is_unavailable_not_gone(self) -> None:
+        results, fetch = self.check(
+            [
+                source("busy-404", "https://www.youtube.com/feeds/videos.xml?channel_id=UC404", kind="youtube"),
+                source("busy-500", "https://www.youtube.com/feeds/videos.xml?channel_id=UC500", kind="youtube"),
+            ],
+            {
+                "https://www.youtube.com/feeds/videos.xml?channel_id=UC404": FetchResult(404),
+                "https://www.youtube.com/feeds/videos.xml?channel_id=UC500": FetchResult(500),
+                "https://www.youtube.com/channel/UC404": FetchResult(200, "https://www.youtube.com/channel/UC404", body=LIVE_CHANNEL_PAGE),
+                "https://www.youtube.com/channel/UC500": FetchResult(429),
+            },
+        )
+
+        self.assertEqual(results["busy-404"].status, UNAVAILABLE)
+        self.assertIn("channel page loads", results["busy-404"].detail)
+        self.assertEqual(results["busy-500"].status, UNAVAILABLE)
+        self.assertIn("could not be checked", results["busy-500"].detail)
+        self.assertFalse(results["busy-404"].is_problem)
+        # The channel page is checked only on the retry, once per failing feed.
+        self.assertEqual(fetch.calls.count("https://www.youtube.com/channel/UC404"), 1)
+        self.assertEqual(fetch.calls.count("https://www.youtube.com/feeds/videos.xml?channel_id=UC404"), 2)
+
+    def test_a_redirect_to_an_unsafe_address_is_reported_as_not_followed(self) -> None:
+        results, _fetch = self.check(
+            [source("artist-site", "https://feeds.soundcloud.com/users/3/sounds.rss")],
+            {"https://feeds.soundcloud.com/users/3/sounds.rss": FetchResult(0, "http://www.artist.example/", error=REDIRECT_NOT_FOLLOWED)},
+        )
+
+        self.assertEqual(results["artist-site"].status, NOT_A_FEED)
+        self.assertEqual(results["artist-site"].detail, "redirects to http://www.artist.example, which is not followed")
 
     def test_an_empty_feed_is_not_a_problem(self) -> None:
         results, _fetch = self.check(
@@ -210,7 +249,7 @@ class ClassificationTests(unittest.TestCase):
         sources = [source(f"feed-{index}", url) for index, url in enumerate(urls)]
         responses = {url: FetchResult(200, url, body=rss("Wed, 14 Oct 2026 10:00:00 +0000")) for url in urls}
 
-        results = check_feeds(sources, fetch=FakeFetcher(responses), now=NOW, pause_seconds=0)
+        results = check_feeds(sources, fetch=FakeFetcher(responses), now=NOW, pause_seconds=0, retry_delay_seconds=0)
 
         self.assertEqual([health.source_id for health in results], [item.id for item in sources])
 
@@ -234,7 +273,7 @@ class PacingTests(unittest.TestCase):
         sources = [source(f"yt-{index}", f"https://www.youtube.com/feeds/videos.xml?channel_id=UC{index}") for index in range(12)]
         sources += [source(f"site-{index}", f"https://site{index}.example/feed") for index in range(6)]
 
-        check_feeds(sources, fetch=fetch, now=NOW, workers=10, host_limits={"youtube.com": 2}, pause_seconds=0)
+        check_feeds(sources, fetch=fetch, now=NOW, workers=10, host_limits={"youtube.com": 2}, pause_seconds=0, retry_delay_seconds=0)
 
         self.assertLessEqual(peak["youtube"], 2)
         self.assertGreater(peak["other"], 1)
@@ -254,7 +293,7 @@ class OutputTests(unittest.TestCase):
             source("empty-artist", "https://feeds.soundcloud.com/users/1/sounds.rss"),
             source("old-blog", "https://old.example/feed"),
         ]
-        self.results = check_feeds(sources, fetch=FakeFetcher(responses), now=NOW, pause_seconds=0, retry=False)
+        self.results = check_feeds(sources, fetch=FakeFetcher(responses), now=NOW, pause_seconds=0, retry=False, retry_delay_seconds=0)
 
     def test_summary_redacts_private_urls_unless_asked(self) -> None:
         redacted = format_summary(self.results, skipped_generated=3)
@@ -267,6 +306,29 @@ class OutputTests(unittest.TestCase):
         self.assertIn("Skipped 3 generated feeds", redacted)
         self.assertIn("s3cret-token", shown)
         self.assertIn("Nothing was changed.", redacted)
+
+    def test_moves_on_the_same_host_say_what_changed(self) -> None:
+        self.assertEqual(describe_move("http://feeds.example/show", "https://feeds.example/show"), "http://feeds.example -> https://feeds.example")
+        self.assertEqual(describe_move("https://feeds.example/old", "https://feeds.example/new"), "feeds.example (new path)")
+        self.assertEqual(describe_move("https://a.example/feed", "https://b.example/feed"), "a.example -> b.example")
+
+    def test_unavailable_feeds_are_listed_apart_from_problems(self) -> None:
+        responses = {
+            "https://www.youtube.com/feeds/videos.xml?channel_id=UC9": FetchResult(404),
+            "https://www.youtube.com/channel/UC9": FetchResult(200, "https://www.youtube.com/channel/UC9", body=LIVE_CHANNEL_PAGE),
+        }
+        results = check_feeds(
+            [source("busy-channel", "https://www.youtube.com/feeds/videos.xml?channel_id=UC9", kind="youtube")],
+            fetch=FakeFetcher(responses),
+            now=NOW,
+            pause_seconds=0,
+            retry_delay_seconds=0,
+        )
+
+        summary = format_summary(results)
+
+        self.assertIn("Problems (0):", summary)
+        self.assertIn("Temporarily unavailable; the source still exists, check again later (1):", summary)
 
     def test_report_lists_every_category_without_secrets(self) -> None:
         with TemporaryDirectory() as tmp_dir:
@@ -302,6 +364,16 @@ class FetchForHealthTests(unittest.TestCase):
         self.assertEqual(result.status, 400)
         self.assertEqual(result.headers["cf-ray"], "abc")
         self.assertEqual(result.body, b"This publication is invite-only")
+
+    def test_a_refused_redirect_hop_is_reported_with_its_target(self) -> None:
+        with patch("netnewswire_feed_booster.feed_health._validate_fetch_url"):
+            with patch("netnewswire_feed_booster.feed_health._restricted_open_request") as opener:
+                opener.return_value.side_effect = ValueError("Unsafe fetch URL: http://www.artist.example/")
+                result = fetch_for_health("https://feeds.soundcloud.com/users/3/sounds.rss")
+
+        self.assertEqual(result.status, 0)
+        self.assertEqual(result.error, REDIRECT_NOT_FOLLOWED)
+        self.assertEqual(result.final_url, "http://www.artist.example/")
 
     def test_reports_an_unsafe_or_unreachable_url_as_no_response(self) -> None:
         result = fetch_for_health("http://insecure.example/feed")
