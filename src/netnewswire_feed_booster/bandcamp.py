@@ -153,11 +153,13 @@ def parse_bandcamp_artist_music_html(html: str, site_url: str) -> List[BandcampC
     # items and leaves only the rest to data-client-items, so the full list is
     # the grid followed by the client items.
     items = _parse_bandcamp_music_grid_items(html, site_url)
+    page_artist = _bandcamp_music_page_artist(html)
     for item in payload:
         if not isinstance(item, dict):
             continue
         title = str(item.get("title") or "").strip()
-        artist = str(item.get("artist") or "").strip()
+        # Client items often leave out the artist on the page owner's own releases.
+        artist = str(item.get("artist") or "").strip() or page_artist
         page_url = str(item.get("page_url") or "").strip()
         if not title or not page_url:
             continue
@@ -184,8 +186,12 @@ def parse_bandcamp_legacy_music_grid_html(html: str, site_url: str) -> List[Band
     return parse_bandcamp_tralbum_html(html)
 
 
+def _bandcamp_music_page_artist(html: str) -> str:
+    return extract_meta_content(html, "og:title") or title_from_html(html)
+
+
 def _parse_bandcamp_music_grid_items(html: str, site_url: str) -> List[BandcampCollectionItem]:
-    artist = extract_meta_content(html, "og:title") or title_from_html(html)
+    artist = _bandcamp_music_page_artist(html)
     items: List[BandcampCollectionItem] = []
     pattern = re.compile(
         r'<li\b(?P<attrs>[^>]*)class="[^"]*\bmusic-grid-item\b[^"]*"[^>]*>\s*'
