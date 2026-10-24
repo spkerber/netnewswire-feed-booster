@@ -15,7 +15,7 @@ YouTube handles are not stable feed identifiers. Resolve and store the channel I
 
 ## Generated RSS
 
-- Bandcamp artist, label, and fan pages use a per-source local feed. The root page is canonical; do not use an album URL as the source.
+- Bandcamp artist, label, and fan pages use a per-source local feed. The root page is canonical; do not use an album URL as the source. An artist or label `/music` page lists releases without dates, so each refresh that fetches a changed page also reads the artist's discography from `bandcamp.com/api/mobile/24/band_details`: one request per artist, never one per release. Those dates become the items' `pubDate`, and the item cap keeps the newest releases. If the lookup fails, the feed still renders, undated and in page order. A hosted refresh that gets a 304 for an unchanged page makes no lookup.
 - NTS show pages and public Mixcloud profiles use generated RSS because they do not provide a reliable first-party feed for this workflow.
 - A registered webpage recipe can cover a stable public page that has useful updates but no usable native feed or API.
 

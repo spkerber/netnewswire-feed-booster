@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Callable, Iterable, List, Optional, Set
 from urllib.parse import urlparse
 
 from .bandcamp import (
+    PostBandDetails,
+    add_bandcamp_release_dates,
     fetch_bandcamp_collection_items,
     parse_bandcamp_artist_music_html,
     render_bandcamp_collection_rss,
@@ -59,9 +63,17 @@ def bandcamp_items_for_source(
     fan_max_items: Optional[int] = 40,
     full_fan_source_ids: Optional[Set[str]] = None,
     max_items: Optional[int] = 50,
+    post_band_details: Optional[PostBandDetails] = None,
 ) -> list:
+    """Pass `post_band_details` to date an artist's releases (one extra request per artist)."""
     if is_bandcamp_artist_source(source):
         items = parse_bandcamp_artist_music_html(html, source.site_url)
+        if post_band_details is not None:
+            items = add_bandcamp_release_dates(items, html, post_band_details)
+            # Page order is the artist's own and often not chronological, so
+            # once dates are known the cap keeps the newest releases. Undated
+            # items follow in page order; with no dates at all, nothing moves.
+            items = sorted(items, key=lambda item: (not item.collected_at, _negated_timestamp(item.collected_at)))
         return items[:max_items] if max_items is not None else items
 
     fan_limit = max_items if source.id in (full_fan_source_ids or set()) else fan_max_items
@@ -76,6 +88,7 @@ def render_bandcamp_source_rss(
     fan_max_items: Optional[int] = 40,
     full_fan_source_ids: Optional[Set[str]] = None,
     max_items: Optional[int] = 50,
+    post_band_details: Optional[PostBandDetails] = None,
 ) -> str:
     html = fetcher(bandcamp_fetch_url(source))
     items = bandcamp_items_for_source(
@@ -84,6 +97,7 @@ def render_bandcamp_source_rss(
         fan_max_items=fan_max_items,
         full_fan_source_ids=full_fan_source_ids,
         max_items=max_items,
+        post_band_details=post_band_details,
     )
     if not items:
         raise ValueError(f"No Bandcamp items found for {source.id}: {source.site_url}")
@@ -97,6 +111,7 @@ def write_bandcamp_source_rss(
     fan_max_items: Optional[int] = 40,
     full_fan_source_ids: Optional[Set[str]] = None,
     max_items: Optional[int] = 50,
+    post_band_details: Optional[PostBandDetails] = None,
 ) -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(
@@ -106,6 +121,19 @@ def write_bandcamp_source_rss(
             fan_max_items=fan_max_items,
             full_fan_source_ids=full_fan_source_ids,
             max_items=max_items,
+            post_band_details=post_band_details,
         ),
         encoding="utf-8",
     )
+
+
+def _negated_timestamp(value: str) -> float:
+    if not value:
+        return 0.0
+    try:
+        parsed = parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return 0.0
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return -parsed.timestamp()

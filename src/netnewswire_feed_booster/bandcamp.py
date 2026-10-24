@@ -3,12 +3,12 @@ from __future__ import annotations
 import json
 import re
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from email.utils import format_datetime, parsedate_to_datetime
 from html import unescape
 from pathlib import Path
-from typing import Callable, List
+from typing import Callable, List, Optional
 from urllib.parse import urljoin
 
 from .feed_store import Source, source_id_from_title
@@ -17,6 +17,9 @@ from .rss_safety import html_text, image_html
 
 
 BANDCAMP_COLLECTION_API_URL = "https://bandcamp.com/api/fancollection/1/collection_items"
+# An artist's /music page lists releases without dates. This per-artist
+# discography carries a release date for each one, at one request per artist.
+BANDCAMP_BAND_DETAILS_API_URL = "https://bandcamp.com/api/mobile/24/band_details"
 BANDCAMP_USER_AGENT = "netnewswire-feed-booster/0.1"
 BANDCAMP_API_HOSTS = frozenset({"bandcamp.com"})
 
@@ -30,6 +33,11 @@ class BandcampCollectionItem:
     collected_at: str = ""
     artwork_url: str = ""
     featured_track_title: str = ""
+    # "album-123" or "track-456" on an artist page; how release dates are joined.
+    release_key: str = ""
+
+
+PostBandDetails = Callable[[int], dict]
 
 
 @dataclass
@@ -168,6 +176,7 @@ def parse_bandcamp_artist_music_html(html: str, site_url: str) -> List[BandcampC
                 url=urljoin(f"{site_url.rstrip('/')}/", page_url),
                 item_type=str(item.get("type") or "release"),
                 artwork_url=artwork_url,
+                release_key=_release_key(item.get("type"), item.get("id")),
             )
         )
 
@@ -191,8 +200,9 @@ def parse_bandcamp_legacy_music_grid_html(html: str, site_url: str) -> List[Band
         if not title or not href:
             continue
 
-        item_id_match = re.search(r'data-item-id="(?P<item_type>album|track)-', attrs)
+        item_id_match = re.search(r'data-item-id="(?P<item_type>album|track)-(?P<item_id>\d+)?', attrs)
         item_type = item_id_match.group("item_type") if item_id_match else "release"
+        release_key = _release_key(item_type, item_id_match.group("item_id")) if item_id_match else ""
         artwork_match = re.search(r'<img[^>]+src="(?P<src>[^"]+)"', body)
         artwork_url = unescape(artwork_match.group("src")).strip() if artwork_match else ""
         items.append(
@@ -202,12 +212,87 @@ def parse_bandcamp_legacy_music_grid_html(html: str, site_url: str) -> List[Band
                 url=urljoin(f"{site_url.rstrip('/')}/", href),
                 item_type=item_type,
                 artwork_url=artwork_url,
+                release_key=release_key,
             )
         )
 
     if items:
         return _dedupe_items(items)
     return parse_bandcamp_tralbum_html(html)
+
+
+def extract_bandcamp_band_id(html: str) -> Optional[int]:
+    """The page owner's numeric band id.
+
+    The page-level `data-band` comes first: on a label page each release
+    carries its own artist's band id, and only the label's discography covers
+    every release the page lists. The per-release ids are a fallback for pages
+    without it.
+    """
+    match = re.search(r'data-band="([^"]+)"', html, re.DOTALL)
+    if match:
+        try:
+            band = json.loads(unescape(match.group(1)))
+        except json.JSONDecodeError:
+            band = None
+        if isinstance(band, dict) and str(band.get("id") or "").isdigit():
+            return int(band["id"])
+    match = re.search(r'data-client-items="([^"]+)"', html, re.DOTALL)
+    if match:
+        try:
+            payload = json.loads(unescape(match.group(1)))
+        except json.JSONDecodeError:
+            payload = []
+        for item in payload if isinstance(payload, list) else []:
+            if isinstance(item, dict) and str(item.get("band_id") or "").isdigit():
+                return int(item["band_id"])
+    match = re.search(r'data-band-id="(\d+)"', html)
+    return int(match.group(1)) if match else None
+
+
+def post_bandcamp_band_details(band_id: int) -> dict:
+    return fetch_json_post(BANDCAMP_BAND_DETAILS_API_URL, {"band_id": band_id}, allowed_hosts=BANDCAMP_API_HOSTS)
+
+
+def add_bandcamp_release_dates(
+    items: List[BandcampCollectionItem],
+    html: str,
+    post_band_details: PostBandDetails,
+) -> List[BandcampCollectionItem]:
+    """Date an artist page's releases from the artist's discography.
+
+    One request per artist, never one per release. Dates are best effort: if
+    the discography cannot be read, the items come back exactly as they were
+    and the feed still renders, just without dates.
+    """
+    if not any(item.release_key and not item.collected_at for item in items):
+        return items
+    band_id = extract_bandcamp_band_id(html)
+    if band_id is None:
+        return items
+    try:
+        payload = post_band_details(band_id)
+    except Exception as error:
+        print(f"WARNING\tBandcamp release dates unavailable for band {band_id}: {type(error).__name__}")
+        return items
+    discography = payload.get("discography") if isinstance(payload, dict) else None
+    if not isinstance(discography, list):
+        return items
+
+    dates = {}
+    for release in discography:
+        if not isinstance(release, dict):
+            continue
+        key = _release_key(release.get("item_type"), release.get("item_id"))
+        released = str(release.get("release_date") or "").strip()
+        if key and rss_pubdate(released):
+            dates[key] = released
+    return [
+        replace(item, collected_at=dates[item.release_key])
+        if item.release_key in dates and not item.collected_at
+        else item
+        for item in items
+    ]
 
 
 def parse_bandcamp_tralbum_html(html: str) -> List[BandcampCollectionItem]:
@@ -328,6 +413,13 @@ def _bandcamp_item_type(value: str) -> str:
     if value == "t":
         return "track"
     return value or "release"
+
+
+def _release_key(item_type: object, item_id: object) -> str:
+    kind = _bandcamp_item_type(str(item_type or ""))
+    if kind not in {"album", "track"} or not str(item_id or "").isdigit():
+        return ""
+    return f"{kind}-{int(str(item_id))}"
 
 
 def _dedupe_items(items: List[BandcampCollectionItem]) -> List[BandcampCollectionItem]:

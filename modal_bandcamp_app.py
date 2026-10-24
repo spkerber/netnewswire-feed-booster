@@ -199,6 +199,7 @@ def _active_sources_for_route(hosted_route: str):
 
 def _refresh_source(source) -> str:
     from netnewswire_feed_booster.generated_adapters import adapter_for_source
+    from netnewswire_feed_booster.bandcamp import post_bandcamp_band_details
     from netnewswire_feed_booster.hosted_bandcamp import render_bandcamp_source_rss
 
     adapter = adapter_for_source(source)
@@ -217,6 +218,8 @@ def _refresh_source(source) -> str:
         fan_max_items=FAN_MAX_ITEMS,
         full_fan_source_ids=FULL_FAN_SOURCE_IDS,
         max_items=MAX_RSS_ITEMS_PER_SOURCE,
+        # Only reached when the /music page changed; a 304 above returns the cache.
+        post_band_details=post_bandcamp_band_details,
     )
     rss = _limit_rss_items(_ensure_rss(rss))
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
