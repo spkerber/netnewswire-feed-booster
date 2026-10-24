@@ -89,6 +89,31 @@ BANDCAMP_LEGACY_ARTIST_MUSIC_HTML = '''
 </ol>
 '''
 
+BANDCAMP_GRID_AND_CLIENT_ITEMS_MUSIC_HTML = '''
+<title>Music | Fixture Label</title>
+<ol id="music-grid" data-client-items="[{&quot;art_id&quot;:1463768112,&quot;artist&quot;:&quot;Fixture Label&quot;,&quot;page_url&quot;:&quot;/album/older-record&quot;,&quot;title&quot;:&quot;Older Record&quot;,&quot;type&quot;:&quot;album&quot;}]">
+  <li data-item-id="album-2019154464" class="music-grid-item square first-four">
+    <a href="/album/newest-record">
+      <div class="art"><img src="https://f4.bcbits.com/img/a1483434424_2.jpg" alt="" /></div>
+      <p class="title">
+        Newest Record
+      </p>
+    </a>
+  </li>
+  <li data-item-id="album-1142322467" class="music-grid-item square first-four">
+    <a href="https://fixture-guest.bandcamp.com/album/guest-record?label=1&amp;tab=music">
+      <div class="art"><img src="https://f4.bcbits.com/img/a3376867833_2.jpg" alt="" /></div>
+      <p class="title">
+        Guest Record
+        <br><span class="artist-override">
+        Fixture Guest &amp; Friend
+        </span>
+      </p>
+    </a>
+  </li>
+</ol>
+'''
+
 BANDCAMP_TRALBUM_HTML = '''
 <meta property="og:title" content="Fixture Album, by Fixture Archive">
 <meta property="og:type" content="album">
@@ -466,6 +491,22 @@ class SourceImporterTests(unittest.TestCase):
         self.assertEqual(items[0].artist, "Fixture Legacy")
         self.assertEqual(items[0].item_type, "track")
         self.assertEqual(items[0].url, "https://fixture-legacy.bandcamp.com/track/fixture-track")
+
+    def test_parse_bandcamp_artist_music_html_keeps_grid_releases_before_client_items(self) -> None:
+        items = parse_bandcamp_artist_music_html(BANDCAMP_GRID_AND_CLIENT_ITEMS_MUSIC_HTML, "https://fixture-label.bandcamp.com")
+
+        self.assertEqual(
+            [(item.title, item.artist, item.url) for item in items],
+            [
+                ("Newest Record", "Fixture Label", "https://fixture-label.bandcamp.com/album/newest-record"),
+                (
+                    "Guest Record",
+                    "Fixture Guest & Friend",
+                    "https://fixture-guest.bandcamp.com/album/guest-record?label=1&tab=music",
+                ),
+                ("Older Record", "Fixture Label", "https://fixture-label.bandcamp.com/album/older-record"),
+            ],
+        )
 
     def test_parse_bandcamp_tralbum_fallback(self) -> None:
         items = parse_bandcamp_artist_music_html(BANDCAMP_TRALBUM_HTML, "https://fixture-archive.bandcamp.com")
