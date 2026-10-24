@@ -107,6 +107,13 @@ refresh_plan() {
     --profile "${RSS_PROFILE}"
 }
 
+bridge_health() {
+  require_feed_base
+  # The URL carries the feed token, so hand it to curl on stdin rather than as
+  # an argument that would show up in the process list.
+  printf 'url = "%s/feeds/%s/health"\n' "${RSS_FEED_BASE%/}" "${RSS_FEED_TOKEN}" | curl --fail --silent --show-error --config -
+}
+
 verify_netnewswire() {
   export_opml
   require_netnewswire_opml
@@ -170,6 +177,9 @@ case "${MODE}" in
   refresh-plan)
     refresh_plan
     ;;
+  bridge-health)
+    bridge_health
+    ;;
   verify-netnewswire)
     verify_netnewswire
     ;;
@@ -181,7 +191,7 @@ case "${MODE}" in
     export_opml
     ;;
   *)
-    echo "Usage: $0 [deploy-modal|export|refresh-plan|verify-netnewswire|repair-netnewswire|all]" >&2
+    echo "Usage: $0 [deploy-modal|export|refresh-plan|bridge-health|verify-netnewswire|repair-netnewswire|all]" >&2
     exit 2
     ;;
 esac
