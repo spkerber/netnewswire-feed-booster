@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from netnewswire_feed_booster.cli import build_parser, main, normalize_legacy_webpage_command
 from netnewswire_feed_booster.subscription_history import SubscriptionHistoryStore
+from netnewswire_feed_booster.feed_health import EMPTY, GONE, FeedHealth
 from netnewswire_feed_booster.feed_validation import FeedValidationResult
 from netnewswire_feed_booster.feed_store import FeedStore, Source
 from netnewswire_feed_booster.opml import write_opml
@@ -1191,6 +1192,50 @@ class CliTests(unittest.TestCase):
         self.assertIn("ok\trss\tok-feed", rendered)
         self.assertIn("error\thtml\tbroken-feed", rendered)
         self.assertIn("Audited 2 sources; failures: 1", rendered)
+
+    def test_check_feed_health_reports_skips_generated_feeds_and_fails_only_on_problems(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            data_path = Path(tmp_dir) / "sources.json"
+            report_path = Path(tmp_dir) / "tmp" / "feed-health.md"
+            store = FeedStore(data_path)
+            for source in (
+                Source(id="gone-channel", title="Gone Channel", feed_url="https://www.youtube.com/feeds/videos.xml?channel_id=UC1", kind="youtube", profiles=["test-user"]),
+                Source(id="empty-artist", title="Empty Artist", feed_url="https://feeds.soundcloud.com/users/1/sounds.rss", profiles=["test-user"]),
+                Source(id="bandcamp-label", title="Bandcamp: Label", feed_url="file:///tmp/generated/bandcamp-label.rss", kind="bandcamp", profiles=["test-user"]),
+            ):
+                store.add_or_update(source)
+            store.save()
+
+            checked = []
+
+            gone = FeedHealth("gone-channel", "Gone Channel", "youtube", "YouTube", "https://www.youtube.com/feeds/videos.xml?channel_id=UC1", GONE, 404, detail="HTTP 404")
+            empty = FeedHealth("empty-artist", "Empty Artist", "website", "SoundCloud", "https://feeds.soundcloud.com/users/1/sounds.rss", EMPTY, 200)
+
+            def fake_check_feeds(sources, **_kwargs):
+                checked.extend(source.id for source in sources)
+                return [gone, empty]
+
+            output = io.StringIO()
+            with patch("netnewswire_feed_booster.cli.check_feeds", side_effect=fake_check_feeds):
+                with redirect_stdout(output):
+                    result = main(
+                        ["--data", str(data_path), "check-feed-health", "--profile", "test-user", "--report", str(report_path)]
+                    )
+            report_written = report_path.exists()
+
+            # An empty feed alone is not a problem, so the command passes.
+            with patch("netnewswire_feed_booster.cli.check_feeds", return_value=[empty]):
+                with redirect_stdout(io.StringIO()):
+                    only_empty_result = main(["--data", str(data_path), "check-feed-health", "--profile", "test-user"])
+
+        rendered = output.getvalue()
+        self.assertEqual(result, 1)
+        self.assertEqual(sorted(checked), ["empty-artist", "gone-channel"])
+        self.assertIn("Skipped 1 generated feeds", rendered)
+        self.assertIn("gone\tYouTube\tgone-channel", rendered)
+        self.assertIn("Problems (1):", rendered)
+        self.assertTrue(report_written)
+        self.assertEqual(only_empty_result, 0)
 
     def test_subscribe_webpage_feed_uses_a_registered_recipe(self) -> None:
         with TemporaryDirectory() as tmp_dir:

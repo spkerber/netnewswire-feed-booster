@@ -13,6 +13,7 @@ export RSS_PROFILE=me
 | --- | --- | --- |
 | When you find a new source | Add a native feed directly when possible; place it in a reader folder | Use the relevant source command only when you want it in the portable registry |
 | Weekly or before a large import | Export an OPML backup if you are about to reorganize an account | Run `audit-sources` and export a candidate OPML |
+| Monthly, or when feeds seem quiet | Act on what it finds: unsubscribe only what is really gone | Run `check-feed-health --report tmp/feed-health.md` |
 | When a feed is noisy | Unsubscribe or move it in the reader after deciding intentionally | Run `unsubscribe` so it cannot return during reconciliation |
 | When a generated source changes | Do not repeatedly refresh it in the reader | Run `refresh-plan`; redeploy only after source or cadence changes |
 | Before sharing code | Keep OPML, profile JSON, and `.env` files out of Finder shares and Git | Run `./scripts/verify_public_template.sh` |
@@ -47,6 +48,27 @@ python3 -m netnewswire_feed_booster audit-sources --profile "$RSS_PROFILE" --lim
 ```
 
 `audit-sources` returns nonzero if a selected source is not a valid RSS, Atom, or JSON Feed. Run it before a large import, repair, or public cleanup pass.
+
+### Feed Health
+
+```bash
+python3 -m netnewswire_feed_booster check-feed-health --profile "$RSS_PROFILE" --report tmp/feed-health.md
+```
+
+`check-feed-health` checks every active direct feed in a profile and sorts them by what a reader would actually see. It is read-only: it never changes the registry.
+
+- **Working:** ok, quiet for 1–2 years, quiet for 2+ years, undated, or empty.
+- **Unavailable:** the feed failed, but the source demonstrably still exists. Usually temporary, so check again later rather than acting on it.
+- **Problems:** gone (404 or 410), blocked by a bot challenge, a Substack that went invite-only, a feed that now redirects to a web page, refused, server errors, network, DNS, or certificate errors, and `http://` feeds whose `https://` address fails.
+- **Suggested address updates:** a working feed reached through a redirect to a new address, and `http://` feeds that work over `https://`.
+
+An empty feed is reported but never counted as a problem. A SoundCloud artist who has not opted into RSS, or a newsletter with no posts yet, is not dead, so keep those in the list. The exit code is nonzero only when a problem is found.
+
+Requests run in parallel but are capped per host (3 at a time for YouTube, 2 for Substack, 4 for any other host) with a short pause after each, so a registry of a few thousand feeds takes about ten minutes. Each problem is retried once, after a 30-second pause and one request at a time per host.
+
+YouTube's feed endpoint returns 404s and 500s for live channels when it is busy, sometimes for a hundred or more channels in a single run. A YouTube feed that still fails on the retry is called gone only when its channel page says the channel was terminated, removed, or does not exist; otherwise it is reported as unavailable. Generated (`file://`) feeds are skipped, because the hosted bridge refreshes those. Like `audit-sources`, it contacts every publisher it checks, which shows them your IP address.
+
+The summary prints only hosts, because feed URLs can carry private keys. `--show-sensitive` prints full URLs for local inspection. `--report` writes every list, including quiet and empty feeds, as Markdown. The report names your subscriptions, so keep it under `tmp/`, which Git ignores.
 
 ## Generated Feeds
 

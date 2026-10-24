@@ -32,6 +32,14 @@ from .feed_identity import (
     likely_same_title,
     parse_feed_identity,
 )
+from .feed_health import (
+    DEFAULT_PAUSE_SECONDS as DEFAULT_HEALTH_PAUSE_SECONDS,
+    DEFAULT_WORKERS as DEFAULT_HEALTH_WORKERS,
+    check_feeds,
+    format_summary,
+    is_direct_feed,
+    write_report,
+)
 from .feed_validation import audit_source, audit_sources, discover_feed_url, validate_feed_text
 from .generated_migration import apply_generated_source_migration, plan_generated_source_migration
 from .generated_adapters import BANDCAMP_ADAPTER, NTS_ADAPTER, WEBPAGE_ADAPTER, adapter_for_source
@@ -467,6 +475,28 @@ def build_parser() -> argparse.ArgumentParser:
     audit_parser.add_argument("--kind", default=None)
     audit_parser.add_argument("--limit", type=int, default=0, help="Limit sources audited; useful for quick spot checks")
     audit_parser.add_argument("--show-sensitive", action="store_true")
+
+    health_parser = subparsers.add_parser(
+        "check-feed-health",
+        help="Check active direct feeds for gone, blocked, moved, empty, and quiet feeds (read-only)",
+    )
+    health_parser.add_argument("--profile", default=DEFAULT_PROFILE)
+    health_parser.add_argument("--kind", default=None)
+    health_parser.add_argument("--limit", type=int, default=0, help="Limit sources checked; useful for quick spot checks")
+    health_parser.add_argument(
+        "--report",
+        type=Path,
+        default=None,
+        help="Also write a Markdown report with every list. It names your subscriptions, so keep it under the ignored tmp/",
+    )
+    health_parser.add_argument("--workers", type=int, default=DEFAULT_HEALTH_WORKERS, help="Parallel requests across all hosts")
+    health_parser.add_argument(
+        "--pause-seconds",
+        type=float,
+        default=DEFAULT_HEALTH_PAUSE_SECONDS,
+        help="Delay after each request, on top of the per-host caps",
+    )
+    health_parser.add_argument("--show-sensitive", action="store_true")
 
     refresh_plan_parser = subparsers.add_parser(
         "refresh-plan",
@@ -1533,6 +1563,28 @@ def main(argv: Optional[list[str]] = None) -> int:
             print("\t".join(fields))
         print(f"Audited {len(results)} sources; failures: {len(failures)}")
         return 1 if failures else 0
+
+    if args.command == "check-feed-health":
+        if not 1 <= args.workers <= 32:
+            parser.error("--workers must be between 1 and 32")
+        if args.pause_seconds < 0:
+            parser.error("--pause-seconds cannot be negative")
+        sources = filtered_sources_with_private(store, private_store, profile=args.profile, status="active", kind=args.kind)
+        direct = [source for source in sources if is_direct_feed(source)]
+        skipped_generated = len(sources) - len(direct)
+        if args.limit:
+            direct = direct[: args.limit]
+
+        def report_progress(done: int, total: int) -> None:
+            if done % 200 == 0 or done == total:
+                print(f"...checked {done}/{total}", file=sys.stderr, flush=True)
+
+        results = check_feeds(direct, workers=args.workers, pause_seconds=args.pause_seconds, progress=report_progress)
+        print(format_summary(results, skipped_generated=skipped_generated, show_sensitive=args.show_sensitive))
+        if args.report:
+            write_report(results, args.report, skipped_generated=skipped_generated, show_sensitive=args.show_sensitive)
+            print(f"Wrote {args.report}")
+        return 1 if any(health.is_problem for health in results) else 0
 
     if args.command == "refresh-plan":
         # Bandcamp and the rest of the "generated" route are scheduled and batched
