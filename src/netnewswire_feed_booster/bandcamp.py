@@ -157,12 +157,17 @@ def parse_bandcamp_artist_music_html(html: str, site_url: str) -> List[BandcampC
     if not isinstance(payload, list):
         return parse_bandcamp_legacy_music_grid_html(html, site_url)
 
-    items: List[BandcampCollectionItem] = []
+    # The page renders its first releases (the newest 16, in page order) as grid
+    # items and leaves only the rest to data-client-items, so the full list is
+    # the grid followed by the client items.
+    items = _parse_bandcamp_music_grid_items(html, site_url)
+    page_artist = _bandcamp_music_page_artist(html)
     for item in payload:
         if not isinstance(item, dict):
             continue
         title = str(item.get("title") or "").strip()
-        artist = str(item.get("artist") or "").strip()
+        # Client items often leave out the artist on the page owner's own releases.
+        artist = str(item.get("artist") or "").strip() or page_artist
         page_url = str(item.get("page_url") or "").strip()
         if not title or not page_url:
             continue
@@ -184,7 +189,18 @@ def parse_bandcamp_artist_music_html(html: str, site_url: str) -> List[BandcampC
 
 
 def parse_bandcamp_legacy_music_grid_html(html: str, site_url: str) -> List[BandcampCollectionItem]:
-    artist = extract_meta_content(html, "og:title") or title_from_html(html)
+    items = _parse_bandcamp_music_grid_items(html, site_url)
+    if items:
+        return _dedupe_items(items)
+    return parse_bandcamp_tralbum_html(html)
+
+
+def _bandcamp_music_page_artist(html: str) -> str:
+    return extract_meta_content(html, "og:title") or title_from_html(html)
+
+
+def _parse_bandcamp_music_grid_items(html: str, site_url: str) -> List[BandcampCollectionItem]:
+    artist = _bandcamp_music_page_artist(html)
     items: List[BandcampCollectionItem] = []
     pattern = re.compile(
         r'<li\b(?P<attrs>[^>]*)class="[^"]*\bmusic-grid-item\b[^"]*"[^>]*>\s*'
@@ -195,8 +211,12 @@ def parse_bandcamp_legacy_music_grid_html(html: str, site_url: str) -> List[Band
         attrs = match.group("attrs")
         body = match.group("body")
         title_match = re.search(r'<p class="title">\s*(?P<title>.*?)\s*</p>', body, re.DOTALL)
+        title_html = title_match.group("title") if title_match else ""
+        # Label pages and collaborations name the release's own artist here.
+        override_match = re.search(r'<span class="artist-override">(?P<artist>.*?)</span>', title_html, re.DOTALL)
         href = unescape(match.group("href")).strip()
-        title = clean_html_text(title_match.group("title")) if title_match else ""
+        title = clean_html_text(title_html[: override_match.start()] if override_match else title_html)
+        release_artist = clean_html_text(override_match.group("artist")) if override_match else ""
         if not title or not href:
             continue
 
@@ -208,7 +228,7 @@ def parse_bandcamp_legacy_music_grid_html(html: str, site_url: str) -> List[Band
         items.append(
             BandcampCollectionItem(
                 title=title,
-                artist=artist,
+                artist=release_artist or artist,
                 url=urljoin(f"{site_url.rstrip('/')}/", href),
                 item_type=item_type,
                 artwork_url=artwork_url,
@@ -216,9 +236,7 @@ def parse_bandcamp_legacy_music_grid_html(html: str, site_url: str) -> List[Band
             )
         )
 
-    if items:
-        return _dedupe_items(items)
-    return parse_bandcamp_tralbum_html(html)
+    return items
 
 
 def extract_bandcamp_band_id(html: str) -> Optional[int]:
