@@ -449,7 +449,111 @@ MAILCHIMP_ENGINEERING_BLOG_RECIPE = WebpageFeedRecipe(
     parse=parse_mailchimp_engineering_blog,
 )
 
-WEBPAGE_FEED_RECIPES = (HYDEFM_ARCHIVE_RECIPE, OSGH_NEON_SHRINES_RECIPE, MAILCHIMP_ENGINEERING_BLOG_RECIPE)
+_LANGFUSE_POST_PATH = re.compile(r"/blog/(?P<date>\d{4}-\d{2}-\d{2})-[a-z0-9-]+/?")
+_LANGFUSE_SHOWN_DATE = re.compile(r"[A-Z][a-z]{2} \d{1,2}, \d{4}")
+
+
+class _LangfuseBlogHTMLParser(HTMLParser):
+    """Collect each post card: an anchor to a dated /blog/ path holding its h3 title and p lines."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.cards: List[dict] = []
+        self.card: Optional[dict] = None
+        self.anchor_depth = 0
+        self.capture = ""
+        self.parts: List[str] = []
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        if tag == "a":
+            href = str(dict(attrs).get("href") or "")
+            if self.card is None and _LANGFUSE_POST_PATH.fullmatch(href):
+                self.card = {"href": href.rstrip("/"), "lines": []}
+                self.anchor_depth = 1
+            elif self.card is not None:
+                self.anchor_depth += 1
+        elif tag in {"h3", "p"} and self.card is not None and not self.capture:
+            self.capture = tag
+            self.parts = []
+
+    def handle_data(self, data: str) -> None:
+        if self.capture:
+            self.parts.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == self.capture:
+            text = " ".join("".join(self.parts).split())
+            if text and self.card is not None:
+                self.card["lines"].append((tag, text))
+            self.capture = ""
+        elif tag == "a" and self.card is not None:
+            self.anchor_depth -= 1
+            if self.anchor_depth == 0:
+                self.cards.append(self.card)
+                self.card = None
+
+
+def parse_langfuse_blog(html: str, site_url: str) -> ParsedWebpageFeed:
+    parser = _LangfuseBlogHTMLParser()
+    parser.feed(html)
+
+    dated_items: List[tuple] = []
+    seen_urls: set = set()
+    for card in parser.cards:
+        url = f"https://langfuse.com{card['href']}"
+        titles = [text for tag, text in card["lines"] if tag == "h3"]
+        if not titles or url in seen_urls:
+            continue
+        seen_urls.add(url)
+        lines = card["lines"]
+        title_index = lines.index(("h3", titles[0]))
+        before = [text for _tag, text in lines[:title_index]]
+        after = [text for _tag, text in lines[title_index + 1 :]]
+        shown_dates = [text for text in after if _LANGFUSE_SHOWN_DATE.fullmatch(text)]
+        prose = [text for text in after if text not in shown_dates]
+        details = {}
+        if prose:
+            details["Summary"] = [prose[0]]
+        if before:
+            details["Category"] = [before[0]]
+        if shown_dates and after.index(shown_dates[0]) + 1 < len(after):
+            details["Authors"] = [after[after.index(shown_dates[0]) + 1]]
+        # The path's date is structural; the date shown on the card is the same day.
+        published = _LANGFUSE_POST_PATH.fullmatch(card["href"]).group("date")
+        item = WebpageFeedItem(title=titles[0], url=url, published_at=f"{published}T00:00:00+00:00", details=details)
+        dated_items.append((published, item))
+
+    if not dated_items:
+        raise ValueError(f"Could not find Langfuse blog posts for {site_url}")
+    # A highlights row leads the page, so sort rather than trust page order.
+    dated_items.sort(key=lambda entry: entry[0], reverse=True)
+    return ParsedWebpageFeed(
+        title="Langfuse Blog",
+        description=f"Posts from the Langfuse blog, generated from {site_url}.",
+        items=tuple(item for _published, item in dated_items),
+    )
+
+
+# Langfuse publishes no RSS or Atom feed; the blog index lists recent posts as cards.
+LANGFUSE_BLOG_RECIPE = WebpageFeedRecipe(
+    id="langfuse-blog",
+    name="Langfuse Blog",
+    default_url="https://langfuse.com/blog",
+    source_id_prefix="blog",
+    allowed_site_hosts=frozenset({"langfuse.com", "www.langfuse.com"}),
+    allowed_path_prefixes=("/blog",),
+    allowed_fetch_hosts=frozenset({"langfuse.com", "www.langfuse.com"}),
+    allowed_item_hosts=frozenset({"langfuse.com"}),
+    allowed_image_hosts=frozenset(),
+    parse=parse_langfuse_blog,
+)
+
+WEBPAGE_FEED_RECIPES = (
+    HYDEFM_ARCHIVE_RECIPE,
+    OSGH_NEON_SHRINES_RECIPE,
+    MAILCHIMP_ENGINEERING_BLOG_RECIPE,
+    LANGFUSE_BLOG_RECIPE,
+)
 
 
 def webpage_recipe_for_url(site_url: str) -> Optional[WebpageFeedRecipe]:

@@ -11,6 +11,7 @@ from netnewswire_feed_booster.webpage_feeds import (
 )
 from netnewswire_feed_booster.webpage_recipes import (
     HYDEFM_ARCHIVE_RECIPE,
+    LANGFUSE_BLOG_RECIPE,
     MAILCHIMP_ENGINEERING_BLOG_RECIPE,
     OSGH_NEON_SHRINES_RECIPE,
     webpage_recipe_for_url,
@@ -80,6 +81,29 @@ MAILCHIMP_BLOG_HTML = """
 <div class="fern-changelog-day-group"><time class="fern-changelog-day" dateTime="2021-11-16T00:00:00.000Z">Nov 16, 2021</time><div class="fern-changelog-day-entries"><div class="fern-changelog-card"><span class="fern-changelog-card-marker" aria-hidden="true"></span><div class="fern-changelog-card-body"><h3 class="fern-changelog-card-title"><a data-astro-prefetch="viewport" href="/developer/blog/leading-teams-closing-loops" class="fern-changelog-card-link">Leading Teams and Closing Loops</a></h3><p class="fern-changelog-card-excerpt">Your work isn’t solely defined by the PRs you push out</p><div class="fern-changelog-card-tags"><span class="fern-docs-badge small grayscale subtle">Culture</span><span class="fern-docs-badge small grayscale subtle">Engineering</span></div></div></div></div></div>
 </div>
 """
+
+
+# Card markup copied from the live blog index (October 2026), trimmed to three
+# posts. A highlights row leads the page, so the oldest card here comes first.
+# The tag link and the off-site card prove that only dated /blog/ posts count.
+LANGFUSE_CARD = (
+    '<a class="group relative flex flex-col md:flex-row gap-1.5 px-4 py-3" href="{href}">'
+    '<div class="flex-1 min-w-0 flex flex-col gap-1.5"><p class="text-[13px] text-text-tertiary capitalize md:truncate">{category}</p>'
+    '<h3 class="text-left text-[16px] font-analog font-medium"><span class="inline-flex relative items-center">'
+    '<span class="absolute inset-x-0 top-1/2 bg-[#FBFF7A]" aria-hidden="true"></span><span class="relative">{title}</span></span></h3>'
+    '<p class="text-[13px] text-text-tertiary leading-snug md:truncate">{summary}</p></div>'
+    '<div class="flex md:shrink-0 md:flex-col md:items-end gap-1 pt-0.5"><p class="text-[12px] text-text-tertiary tabular-nums">{shown}</p>'
+    '<span class="text-[12px] text-text-tertiary md:hidden">·</span><p class="text-[12px] text-text-tertiary">{authors}</p></div></a>'
+)
+LANGFUSE_BLOG_HTML = (
+    '<section class="rounded-[2px] border"><div class="flex items-center px-4 py-3"><h2 class="font-analog">Highlights</h2></div><div class="divide-y">'
+    + LANGFUSE_CARD.format(href="/blog/2026-04-27-langfuse-cloud-japan", category="announcement", title="Langfuse Cloud Japan Region", summary="Langfuse Cloud Japan is live.", shown="Apr 27, 2026", authors="Marc, Clemens, Max")
+    + '</div></section><a href="/blog/tags/engineering">engineering</a><div class="divide-y">'
+    + LANGFUSE_CARD.format(href="/blog/2026-10-21-building-the-langfuse-assistant", category="engineering", title="How we built Langfuse Halo", summary="How we built Langfuse Halo, our in-app assistant.", shown="Oct 21, 2026", authors="Ben")
+    + LANGFUSE_CARD.format(href="/blog/2026-09-23-catching-conversation-signals-in-langfuse", category="engineering", title="Catching conversation signals in Langfuse", summary="Score every chat agent conversation &amp; resolution.", shown="Sep 23, 2026", authors="Annabell")
+    + LANGFUSE_CARD.format(href="https://evil.example/blog/2026-10-22-phish", category="engineering", title="Totally Real Post", summary="No.", shown="Oct 22, 2026", authors="Nobody")
+    + "</div>"
+)
 
 
 def parse_fixture_updates(_content: str, site_url: str) -> ParsedWebpageFeed:
@@ -413,6 +437,39 @@ class WebpageFeedTests(unittest.TestCase):
             with self.subTest(url=unsupported_url):
                 with self.assertRaises(ValueError):
                     recipe_fetch_url(MAILCHIMP_ENGINEERING_BLOG_RECIPE, unsupported_url)
+
+
+    def test_langfuse_blog_recipe_reads_dated_post_cards_newest_first(self) -> None:
+        parsed = parse_webpage_feed(LANGFUSE_BLOG_RECIPE, LANGFUSE_BLOG_HTML, LANGFUSE_BLOG_RECIPE.default_url)
+        rss = render_webpage_feed_rss(LANGFUSE_BLOG_RECIPE, LANGFUSE_BLOG_RECIPE.default_url, LANGFUSE_BLOG_HTML)
+
+        self.assertEqual(parsed.title, "Langfuse Blog")
+        self.assertEqual(
+            [(item.title, item.url) for item in parsed.items],
+            [
+                ("How we built Langfuse Halo", "https://langfuse.com/blog/2026-10-21-building-the-langfuse-assistant"),
+                ("Catching conversation signals in Langfuse", "https://langfuse.com/blog/2026-09-23-catching-conversation-signals-in-langfuse"),
+                ("Langfuse Cloud Japan Region", "https://langfuse.com/blog/2026-04-27-langfuse-cloud-japan"),
+            ],
+        )
+        self.assertEqual(
+            parsed.items[1].details,
+            {"Summary": ["Score every chat agent conversation & resolution."], "Category": ["engineering"], "Authors": ["Annabell"]},
+        )
+        self.assertIn("<pubDate>Wed, 21 Oct 2026 00:00:00 +0000</pubDate>", rss)
+        self.assertNotIn("evil.example", rss)
+
+    def test_langfuse_blog_recipe_is_bounded_to_the_blog(self) -> None:
+        self.assertIs(webpage_recipe_for_url("https://langfuse.com/blog"), LANGFUSE_BLOG_RECIPE)
+        for unsupported_url in (
+            "https://langfuse.com/docs",
+            "https://langfuse.com/blog?page=2",
+            "https://langfuse.com.evil.example/blog",
+            "http://langfuse.com/blog",
+        ):
+            with self.subTest(url=unsupported_url):
+                with self.assertRaises(ValueError):
+                    recipe_fetch_url(LANGFUSE_BLOG_RECIPE, unsupported_url)
 
 
 if __name__ == "__main__":
