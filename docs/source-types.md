@@ -23,7 +23,7 @@ Generated feeds are stored under ignored `exports/` paths and are rewritten to t
 
 ## Webpage Recipes
 
-A webpage recipe is a small, reviewed parser for one exact public URL shape. It declares the permitted page, item, image, and fetch hosts before any request runs. The HydeFM archive, the OSGH NEON SHRINES show page, and the Mailchimp Engineering blog are the current recipes. HydeFM is the example source, not the name of the feature.
+A webpage recipe is a small, reviewed parser for one exact public URL shape. It declares the permitted page, item, image, and fetch hosts before any request runs. The HydeFM archive, the OSGH NEON SHRINES show page, the Mailchimp Engineering blog, and the Langfuse blog are the current recipes. HydeFM is the example source, not the name of the feature.
 
 Use:
 
