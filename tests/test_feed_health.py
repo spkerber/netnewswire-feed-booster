@@ -8,6 +8,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 from urllib.error import HTTPError
 
+import isolated_env  # Clears private profile settings; keep above package imports.
 from netnewswire_feed_booster.feed_health import (
     BOT_CHALLENGE,
     EMPTY,

@@ -4,6 +4,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+import isolated_env  # Clears private profile settings; keep above package imports.
 from netnewswire_feed_booster.bandcamp import (
     fetch_bandcamp_collection_items,
     parse_bandcamp_artist_music_html,

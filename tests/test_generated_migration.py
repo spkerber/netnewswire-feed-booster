@@ -2,6 +2,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+import isolated_env  # Clears private profile settings; keep above package imports.
 from netnewswire_feed_booster.feed_store import FeedStore, Source
 from netnewswire_feed_booster.generated_migration import (
     apply_generated_source_migration,

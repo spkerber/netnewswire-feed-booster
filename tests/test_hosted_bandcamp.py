@@ -1,5 +1,6 @@
 import unittest
 
+import isolated_env  # Clears private profile settings; keep above package imports.
 from netnewswire_feed_booster.feed_store import Source
 from netnewswire_feed_booster.hosted_bandcamp import (
     hosted_generated_feed_url,

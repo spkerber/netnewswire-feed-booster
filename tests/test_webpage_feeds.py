@@ -1,5 +1,6 @@
 import unittest
 
+import isolated_env  # Clears private profile settings; keep above package imports.
 from netnewswire_feed_booster.rss_safety import limit_rss_items
 from netnewswire_feed_booster.webpage_feeds import (
     ParsedWebpageFeed,

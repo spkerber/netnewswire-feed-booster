@@ -2,6 +2,7 @@ import io
 import unittest
 from contextlib import redirect_stdout
 
+import isolated_env  # Clears private profile settings; keep above package imports.
 from netnewswire_feed_booster.bandcamp import (
     add_bandcamp_release_dates,
     extract_bandcamp_band_id,

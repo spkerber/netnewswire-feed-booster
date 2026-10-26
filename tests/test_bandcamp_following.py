@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import isolated_env  # Clears private profile settings; keep above package imports.
 from netnewswire_feed_booster.bandcamp_following import (
     bandcamp_following_band_source,
     bandcamp_following_fan_source,

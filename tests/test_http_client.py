@@ -2,6 +2,7 @@ import socket
 import unittest
 from unittest.mock import patch
 
+import isolated_env  # Clears private profile settings; keep above package imports.
 from netnewswire_feed_booster.http_client import (
     fetch_json_post,
     fetch_text,
