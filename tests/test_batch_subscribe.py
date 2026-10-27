@@ -5,6 +5,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+import isolated_env  # Clears private profile settings; keep above package imports.
 from netnewswire_feed_booster.batch_subscribe import (
     BATCH_ADAPTER_COMMANDS,
     BatchLine,

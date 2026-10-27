@@ -1,5 +1,6 @@
 import unittest
 
+import isolated_env  # Clears private profile settings; keep above package imports.
 from netnewswire_feed_booster.feed_identity import (
     canonical_url,
     identity_match_reason,

@@ -2,6 +2,7 @@ import unittest
 from email.message import Message
 from urllib.error import HTTPError
 
+import isolated_env  # Clears private profile settings; keep above package imports.
 from netnewswire_feed_booster.rss_safety import ensure_rss_channel, is_safe_source_id, limit_rss_items, parse_internet_date, safe_https_url, validate_source_id
 from netnewswire_feed_booster.http_client import fetch_text, fetch_text_response
 

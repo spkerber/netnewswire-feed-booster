@@ -1,5 +1,6 @@
 import unittest
 
+import isolated_env  # Clears private profile settings; keep above package imports.
 from netnewswire_feed_booster.bridge_policy import FeedWaitingForRefresh, due_sources, refresh_route_plan, require_cached_feed
 
 

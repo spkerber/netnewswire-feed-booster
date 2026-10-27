@@ -4,6 +4,7 @@ import json
 import unittest
 from unittest.mock import patch
 
+import isolated_env  # Clears private profile settings; keep above package imports.
 from netnewswire_feed_booster.starter_import import build_starter_import
 from netnewswire_feed_booster.opml import parse_opml
 

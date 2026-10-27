@@ -2,6 +2,7 @@ import io
 import unittest
 from contextlib import redirect_stdout
 
+import isolated_env  # Clears private profile settings; keep above package imports.
 from netnewswire_feed_booster.feed_store import Source
 from netnewswire_feed_booster.source_collections import print_drift_report
 

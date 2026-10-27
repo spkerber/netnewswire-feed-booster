@@ -7,6 +7,7 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import patch
 
+import isolated_env  # Clears private profile settings; keep above package imports.
 from netnewswire_feed_booster.cli import main
 from netnewswire_feed_booster.feed_store import default_sources_path, validate_profile_id
 from netnewswire_feed_booster.subscription_history import default_subscription_history_path

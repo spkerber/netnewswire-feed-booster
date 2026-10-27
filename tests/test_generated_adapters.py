@@ -1,6 +1,7 @@
 import unittest
 from unittest.mock import patch
 
+import isolated_env  # Clears private profile settings; keep above package imports.
 from netnewswire_feed_booster.feed_store import Source
 from netnewswire_feed_booster.generated_adapters import (
     BANDCAMP_ADAPTER,
