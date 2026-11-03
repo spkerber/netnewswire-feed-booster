@@ -40,6 +40,8 @@ Before you start adding your own subscriptions, it helps to know which of these 
 
 If you're only ever reading in NetNewsWire on this one Mac, the "extra step" doesn't matter — everything already works. It only matters once you want the same subscriptions on your iPhone or iPad too. See [How Feeds Actually Work Here](../README.md#how-feeds-actually-work-here) for why the split exists, and [Hosted Bridge](hosting.md) when you're ready to take that step.
 
+Either way, a generated feed changes only when something rebuilds it. On one Mac, run `./scripts/netnewswire_workflow.sh refresh-local` every week or two. With the hosted bridge, the bridge rebuilds the NTS, Mixcloud, and webpage-recipe feeds itself. Bandcamp blocks cloud hosts, so `./scripts/netnewswire_workflow.sh catch-up` rebuilds those from your Mac every couple of weeks. `./scripts/netnewswire_workflow.sh status` shows how current they are in either setup. [Two Setups For Generated Feeds](../README.md#two-setups-for-generated-feeds) compares them side by side.
+
 ## GUI-First Workflow (No Terminal)
 
 Use this path when you only need native feeds and want NetNewsWire to handle the whole workflow. To exercise Feed Booster without typing commands, download the repository and double-click `Build Starter Import.command` as described in [First Import](first-feed.md).
@@ -164,9 +166,9 @@ sequenceDiagram
 
 ## Optional Hosted Generated Feeds
 
-Most sources are direct HTTPS feeds and do not need a host. Set up a bridge only when a generated local feed cannot be refreshed reliably through `file://`.
+Most sources are direct HTTPS feeds and do not need a host. Set up a bridge only when you want generated feeds on more than one device. On one Mac, `file://` feeds plus `refresh-local` are a complete setup.
 
-The repository includes a tested Modal deployment. Cloudflare, Railway, and DigitalOcean are reasonable future hosts but are not turnkey targets here. Read [Hosted Bridge](hosting.md) and [Slow Reading And Refresh Policy](reading-practice.md) before deploying.
+The repository includes a tested Modal deployment. Cloudflare, Railway, and DigitalOcean are reasonable future hosts but are not turnkey targets here. On Modal, Bandcamp feeds are kept current from your Mac with `catch-up`, because Bandcamp blocks cloud hosts. Read [Hosted Bridge](hosting.md) and [Slow Reading And Refresh Policy](reading-practice.md) before deploying.
 
 ## First Maintenance Pass
 
@@ -176,3 +178,4 @@ After the first successful import:
 2. Use NetNewsWire folders for reading organization. If you want those folders to travel with a portable OPML export, save your own folder path in the registry; the project does not impose categories.
 3. Keep direct feeds direct; do not proxy a publisher’s working HTTPS feed.
 4. Run the maintenance routine in [Operations](operations.md) before a large import or after a major cleanup.
+5. If you added generated feeds, pick a rhythm for rebuilding them: `refresh-local` on one Mac, `catch-up` with the hosted bridge. See [Keeping Generated Feeds Current](operations.md#keeping-generated-feeds-current).

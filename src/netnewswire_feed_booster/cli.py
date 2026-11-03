@@ -72,6 +72,7 @@ from .bridge_policy import (
 )
 from .hosted_bandcamp import BandcampBotCheck, bandcamp_fetch_url, bandcamp_items_for_source, sources_with_hosted_generated_feeds
 from .hosted_bandcamp import render_bandcamp_source_rss
+from .local_feeds import DEFAULT_STALE_DAYS, format_local_feed_status, local_feed_group
 from .nts import parse_nts_show_html
 from .mixcloud import mixcloud_source
 from .opml import parse_opml, write_opml
@@ -313,11 +314,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     email_parser = subparsers.add_parser(
         "subscribe-email-source",
-        help="Add a newsletter that arrives by email: generate its private address and an empty feed",
+        help="Optional, in progress: add a newsletter that arrives by email (needs a mail hook not included yet)",
         description=(
-            "Add an email source: mail sent to its own address becomes items in a feed the hosted bridge serves. "
-            "The address is printed once and kept only in the private registry. Redeploy afterwards, because "
-            "the bridge reads the registry shipped with each deploy."
+            "Optional and in progress. Add an email source: mail sent to its own address becomes items in a feed "
+            "the hosted bridge serves. The bridge side is complete, but the mail-host hook that delivers mail to it "
+            "is not included yet, so mail cannot arrive end to end. The address is printed once and kept only in "
+            "the private registry. Redeploy afterwards, because the bridge reads the registry shipped with each deploy."
         ),
     )
     email_parser.add_argument("--title", required=True)
@@ -554,6 +556,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Delay after each request, on top of the per-host caps",
     )
     health_parser.add_argument("--show-sensitive", action="store_true")
+
+    local_status_parser = subparsers.add_parser(
+        "local-feed-status",
+        help="Show how long ago the generated feeds on this Mac were rebuilt (read-only, no network)",
+    )
+    local_status_parser.add_argument("--profile", default=DEFAULT_PROFILE)
+    local_status_parser.add_argument("--out-dir", type=Path, default=Path("exports/generated"))
+    local_status_parser.add_argument(
+        "--stale-days", type=float, default=DEFAULT_STALE_DAYS, help="Call a feed behind after this many days without a rebuild"
+    )
+    local_status_parser.add_argument("--list", action="store_true", help="Name every feed not rebuilt recently or not built yet")
 
     refresh_plan_parser = subparsers.add_parser(
         "refresh-plan",
@@ -1737,6 +1750,24 @@ def main(argv: Optional[list[str]] = None) -> int:
             print(f"Wrote {args.report}")
         return 1 if any(health.is_problem for health in results) else 0
 
+    if args.command == "local-feed-status":
+        if args.stale_days <= 0:
+            parser.error("--stale-days must be positive")
+        bandcamp_ids, other_ids = [], []
+        for source in store.active_sources(args.profile):
+            adapter = adapter_for_source(source)
+            if adapter is None or not adapter.fetches_upstream:
+                # Direct feeds have no local file, and email feeds are built by the bridge.
+                continue
+            (bandcamp_ids if adapter is BANDCAMP_ADAPTER else other_ids).append(source.id)
+        now = time.time()
+        groups = [
+            local_feed_group("bandcamp", bandcamp_ids, args.out_dir, now, args.stale_days),
+            local_feed_group("other", other_ids, args.out_dir, now, args.stale_days),
+        ]
+        print(format_local_feed_status(groups, args.out_dir, args.profile, now, args.stale_days, list_sources=args.list), end="")
+        return 0
+
     if args.command == "refresh-plan":
         try:
             bandcamp_refresh = bandcamp_refresh_setting(args.bandcamp_refresh)
@@ -1771,7 +1802,10 @@ def main(argv: Optional[list[str]] = None) -> int:
         has_capacity_gap = False
         for route in ("bandcamp", "generated"):
             if route == "bandcamp" and bandcamp_refresh == "off":
-                print(f"bandcamp: {route_counts[route]} sources; refresh off, serving the last cached or deploy-time copy")
+                print(
+                    f"bandcamp: {route_counts[route]} sources; refresh off, serving the last cached or deploy-time copy "
+                    "until ./scripts/netnewswire_workflow.sh catch-up rebuilds them"
+                )
                 continue
             plan = refresh_route_plan(
                 route,

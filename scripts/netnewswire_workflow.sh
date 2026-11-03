@@ -26,6 +26,7 @@ MODAL_VOLUME_NAME="${MODAL_VOLUME_NAME:-${MODAL_APP_NAME}-cache}"
 RSS_FEED_BASE="${RSS_FEED_BASE:-${MODAL_FEED_BASE:-}}"
 RSS_FEED_TOKEN="${RSS_FEED_TOKEN:-${BANDCAMP_FEED_TOKEN:-}}"
 OUT_FILE="${NETNEWSWIRE_OPML_OUT:-exports/${RSS_PROFILE}-netnewswire-hosted.opml}"
+LOCAL_OUT_FILE="${NETNEWSWIRE_LOCAL_OPML_OUT:-exports/${RSS_PROFILE}-netnewswire.opml}"
 MODAL_BIN="${MODAL_BIN:-.venv-modal/bin/modal}"
 NETNEWSWIRE_OPML="${NETNEWSWIRE_OPML:-}"
 
@@ -70,13 +71,38 @@ require_feed_base() {
   fi
 }
 
-deploy_modal() {
-  require_private_profile
+require_modal_deploy() {
   require_feed_token
   if [[ ! -x "${MODAL_BIN}" ]]; then
     echo "Missing ${MODAL_BIN}. Create .venv-modal and install .[modal] before deploying." >&2
     exit 1
   fi
+}
+
+usage() {
+  cat <<USAGE
+Usage: $0 <mode>
+
+Mac only (no host needed):
+  export-local        Write ${LOCAL_OUT_FILE} for NetNewsWire to import
+  refresh-local       Rebuild every generated feed on this Mac
+  status              Show how long ago generated feeds were rebuilt, plus bridge health if a bridge is set up
+
+Hosted bridge:
+  deploy-modal        Deploy the bridge with the current registry and the feeds in exports/generated
+  export              Write hosted OPML to ${OUT_FILE} (the default mode)
+  catch-up            Rebuild Bandcamp feeds on this Mac, then deploy them
+  bridge-health       Show what the deployed bridge is serving
+  refresh-plan        Check refresh capacity before deploying
+  verify-netnewswire  Compare NetNewsWire's subscriptions with the hosted export
+  repair-netnewswire  Replace NetNewsWire's subscriptions with the hosted export, after a backup
+  all                 deploy-modal, then export
+USAGE
+}
+
+deploy_modal() {
+  require_private_profile
+  require_modal_deploy
   export RSS_PROFILE RSS_SOURCES_FILE RSS_FEED_TOKEN MODAL_APP_NAME MODAL_SECRET_NAME MODAL_VOLUME_NAME FULL_FAN_SOURCE_IDS BANDCAMP_CUSTOM_DOMAINS
   "${MODAL_BIN}" secret create "${MODAL_SECRET_NAME}" --from-dotenv "${PRIVATE_ENV_FILE}" --force
   "${MODAL_BIN}" deploy modal_bandcamp_app.py
@@ -96,6 +122,75 @@ export_opml() {
     --bandcamp-feed-token "${RSS_FEED_TOKEN}"
   python3 -m xml.etree.ElementTree "${OUT_FILE}"
   echo "Wrote ${OUT_FILE}"
+}
+
+export_local() {
+  require_private_profile
+  PYTHONPATH=src python3 -m netnewswire_feed_booster \
+    --data "${RSS_SOURCES_FILE}" \
+    --history "${RSS_HISTORY_FILE}" \
+    export-opml \
+    --profile "${RSS_PROFILE}" \
+    --out "${LOCAL_OUT_FILE}"
+  python3 -m xml.etree.ElementTree "${LOCAL_OUT_FILE}"
+  echo "Wrote ${LOCAL_OUT_FILE}. Import it into NetNewsWire with File > Import Subscriptions."
+}
+
+local_feed_status() {
+  PYTHONPATH=src python3 -m netnewswire_feed_booster \
+    --data "${RSS_SOURCES_FILE}" \
+    --history "${RSS_HISTORY_FILE}" \
+    local-feed-status \
+    --profile "${RSS_PROFILE}"
+}
+
+refresh_bandcamp_local() {
+  PYTHONPATH=src python3 -m netnewswire_feed_booster \
+    --data "${RSS_SOURCES_FILE}" \
+    --history "${RSS_HISTORY_FILE}" \
+    refresh-bandcamp-local-feeds \
+    --profile "${RSS_PROFILE}"
+}
+
+refresh_local() {
+  require_private_profile
+  # Bandcamp exits 1 only when it answers this network with a bot check. The
+  # other generated feeds still refresh, and the status shows what moved.
+  bandcamp_status=0
+  refresh_bandcamp_local || bandcamp_status=$?
+  PYTHONPATH=src python3 -m netnewswire_feed_booster \
+    --data "${RSS_SOURCES_FILE}" \
+    --history "${RSS_HISTORY_FILE}" \
+    refresh-generated-local-feeds \
+    --profile "${RSS_PROFILE}"
+  echo
+  local_feed_status
+  echo "NetNewsWire picks up the rebuilt files at its next refresh."
+  return "${bandcamp_status}"
+}
+
+catch_up() {
+  require_private_profile
+  # Check the deploy can run before spending the better part of an hour on the refresh.
+  require_modal_deploy
+  if ! refresh_bandcamp_local; then
+    echo "The Bandcamp refresh stopped early, on a bot check or the error above, so nothing was deployed." >&2
+    echo "After a bot check, run catch-up from a network Bandcamp still answers." >&2
+    exit 1
+  fi
+  deploy_modal
+  echo
+  local_feed_status
+  echo "Bandcamp feeds are caught up on the bridge. bridge-health shows when the next catch-up is due."
+}
+
+status() {
+  require_private_profile
+  local_feed_status
+  if [[ -n "${RSS_FEED_TOKEN:-}" && -n "${RSS_FEED_BASE:-}" ]]; then
+    echo
+    bridge_health
+  fi
 }
 
 refresh_plan() {
@@ -168,6 +263,18 @@ repair_netnewswire() {
 }
 
 case "${MODE}" in
+  export-local)
+    export_local
+    ;;
+  refresh-local)
+    refresh_local
+    ;;
+  status)
+    status
+    ;;
+  catch-up)
+    catch_up
+    ;;
   deploy-modal)
     deploy_modal
     ;;
@@ -190,8 +297,11 @@ case "${MODE}" in
     deploy_modal
     export_opml
     ;;
+  help|-h|--help)
+    usage
+    ;;
   *)
-    echo "Usage: $0 [deploy-modal|export|refresh-plan|bridge-health|verify-netnewswire|repair-netnewswire|all]" >&2
+    usage >&2
     exit 2
     ;;
 esac

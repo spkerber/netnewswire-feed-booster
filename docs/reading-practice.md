@@ -9,7 +9,9 @@ Read in NetNewsWire. Use its read-later, starred, folder, and sync features to d
 | Source type | Who fetches it | What you can tune here |
 | --- | --- | --- |
 | Native RSS, Atom, or JSON Feed | Your reader, directly from the publisher | Nothing in the bridge. Keep it direct. |
-| Generated Bandcamp, NTS, Mixcloud, or webpage-recipe feed | The optional HTTPS bridge | Refresh cadence, per-run batch size, and retained RSS items. |
+| Generated NTS, Mixcloud, or webpage-recipe feed, Mac only | Your Mac, when you run `refresh-local` | How often you run it. |
+| Generated NTS, Mixcloud, or webpage-recipe feed, hosted | The optional HTTPS bridge, on a schedule | Refresh cadence, per-run batch size, and retained RSS items. |
+| Generated Bandcamp feed | Your Mac: `refresh-local` on one Mac, `catch-up` with the bridge | How often you run it. The bridge can refresh Bandcamp only from a host Bandcamp still answers; see [When Bandcamp Blocks The Host](#when-bandcamp-blocks-the-host). |
 
 Direct feeds may still update at the cadence NetNewsWire chooses. The bridge never proxies them, so it does not add latency, cost, or another failure point.
 
@@ -84,15 +86,18 @@ This is intentional: slower recovery is preferable to repeatedly hitting a sourc
 
 Bandcamp can answer a whole network with a bot check: a "Client Challenge" page, sent as HTTP 200, in place of every artist page and API response. Since about October 2026 it has answered every request from Modal this way, while the same requests from a home connection still get real pages, so assume other cloud hosts get it too. The bridge recognizes the page and reports it as `BandcampBotCheck` rather than as a page with no releases. A refresh run stops at the first one, and so does `refresh-bandcamp-local-feeds`, which then exits with status 1, because every further request would get the same answer.
 
-Never try to get past the check. Turn the bridge's Bandcamp refresh off instead, in ignored `data/private.env`, and redeploy:
+Never try to get past the check. Turn the bridge's Bandcamp refresh off instead, in ignored `data/private.env`, and redeploy. The example file already sets it off, because Modal is the bundled host:
 
 ```dotenv
 RSS_BRIDGE_BANDCAMP_REFRESH=off
 ```
 
-With the refresh off, the bridge sends Bandcamp nothing. Bandcamp feeds serve their last cached or deploy-time copy, `bridge-health` lists them as "refresh off" rather than failing or stale, and `refresh-plan` leaves them out of its capacity check. To catch them up now and then, refresh from a network Bandcamp still answers, then redeploy: a seed built after the cached copy is served in its place (see [Seeds Come From Your Checkout](hosting.md#seeds-come-from-your-checkout)).
+With the refresh off, the bridge sends Bandcamp nothing. Bandcamp feeds serve their last cached or deploy-time copy, and `refresh-plan` leaves them out of its capacity check. `bridge-health` lists them as "refresh off" rather than failing or stale, with the date of the last catch-up, and says when the next one is due. To catch them up, run this from a network Bandcamp still answers, such as your home connection:
 
 ```bash
-python3 -m netnewswire_feed_booster refresh-bandcamp-local-feeds --profile "$RSS_PROFILE"
-./scripts/netnewswire_workflow.sh deploy-modal
+./scripts/netnewswire_workflow.sh catch-up
 ```
+
+It rebuilds the Bandcamp feeds on your Mac, then deploys. A seed built after the cached copy is served in its place (see [Seeds Come From Your Checkout](hosting.md#seeds-come-from-your-checkout)). Every two weeks or so suits slow reading. See [Catching Up Bandcamp](hosting.md#catching-up-bandcamp) for the details.
+
+If your host is one Bandcamp still answers, set the refresh back to `on`. The bridge then refreshes Bandcamp on the same schedule as everything else, and stops at the first bot check if that ever changes.

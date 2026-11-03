@@ -23,6 +23,11 @@ DEFAULT_STALE_AFTER_INTERVALS = 3
 # Newsletters and release emails come when they come, so a quiet email source
 # is information, not a failure. Past this, the report calls it quiet.
 DEFAULT_EMAIL_QUIET_DAYS = 30
+# With a route's refresh off, its feeds move only when the owner catches them up
+# from a network the upstream still answers. Past this, the report says so.
+DEFAULT_CATCH_UP_DUE_DAYS = 14
+# A refresh-off copy built this long before the newest one was missed by the last catch-up.
+CATCH_UP_MISSED_AFTER_SECONDS = 24 * 60 * 60
 DEFAULT_LIST_LIMIT = 40
 _URL_PATTERN = re.compile(r"\bhttps?://\S+")
 
@@ -95,6 +100,15 @@ class BridgeHealth:
     email: List[Tuple[str, Optional[float]]] = field(default_factory=list)
     email_quiet: List[str] = field(default_factory=list)
     email_quiet_after_seconds: float = DEFAULT_EMAIL_QUIET_DAYS * 24 * 60 * 60
+    # Refresh-off sources: when the newest copy was built (the last catch-up),
+    # and which sources that catch-up did not rebuild.
+    last_catch_up: Optional[float] = None
+    missed_catch_up: List[Tuple[str, Optional[float]]] = field(default_factory=list)
+    catch_up_due_after_seconds: float = DEFAULT_CATCH_UP_DUE_DAYS * 24 * 60 * 60
+
+    @property
+    def catch_up_due(self) -> bool:
+        return self.last_catch_up is not None and self.checked_at - self.last_catch_up > self.catch_up_due_after_seconds
 
     @property
     def has_problems(self) -> bool:
@@ -112,6 +126,8 @@ def summarize_bridge_health(
     refresh_off: Iterable[str] = (),
     email: Iterable[str] = (),
     email_quiet_days: float = DEFAULT_EMAIL_QUIET_DAYS,
+    built: Optional[Mapping[str, float]] = None,
+    catch_up_due_days: float = DEFAULT_CATCH_UP_DUE_DAYS,
 ) -> BridgeHealth:
     """Sort active generated sources by what a reader is actually getting.
 
@@ -122,6 +138,10 @@ def summarize_bridge_health(
     Sources in `refresh_off` belong to a route whose refresh is switched off.
     They still count toward nothing to serve and seed copy only, but not toward
     failing or stale: their last refresh outcome is history, not a live problem.
+
+    `built` maps refresh-off sources to when the copy they serve was built.
+    The newest of those is the last catch-up; a source built well before it
+    was missed by that catch-up, usually because it failed.
 
     Sources in `email` are never refreshed; each accepted message records a
     success instead. They are listed with their last mail, and called quiet
@@ -137,6 +157,7 @@ def summarize_bridge_health(
         stale_after_seconds=stale_after,
         total=len(ids),
         email_quiet_after_seconds=email_quiet_days * 24 * 60 * 60,
+        catch_up_due_after_seconds=catch_up_due_days * 24 * 60 * 60,
     )
     for source_id in ids:
         state = states.get(source_id, RefreshState())
@@ -163,6 +184,16 @@ def summarize_bridge_health(
             health.stale.append((source_id, last_success))
         elif not state.consecutive_failures:
             health.healthy.append(source_id)
+    built = built or {}
+    build_times = [built[source_id] for source_id in health.refresh_off if source_id in built]
+    if build_times:
+        health.last_catch_up = max(build_times)
+        cutoff = health.last_catch_up - CATCH_UP_MISSED_AFTER_SECONDS
+        health.missed_catch_up = [
+            (source_id, built.get(source_id))
+            for source_id in health.refresh_off
+            if source_id not in built or built[source_id] < cutoff
+        ]
     return health
 
 
@@ -171,6 +202,10 @@ def format_bridge_health(health: BridgeHealth, list_limit: int = DEFAULT_LIST_LI
         if timestamp is None:
             return "never recorded"
         return datetime.fromtimestamp(timestamp, tz=timezone.utc).strftime("%Y-%m-%d")
+
+    def days_ago(timestamp: float) -> str:
+        days = max(int((health.checked_at - timestamp) // 86400), 0)
+        return "today" if days == 0 else f"{days} day{'s' if days != 1 else ''} ago"
 
     lines = [
         f"Hosted bridge health, {datetime.fromtimestamp(health.checked_at, tz=timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
@@ -184,11 +219,25 @@ def format_bridge_health(health: BridgeHealth, list_limit: int = DEFAULT_LIST_LI
         f"  seed copy only    {len(health.seed_only):6d}",
         f"  nothing to serve  {len(health.nothing_to_serve):6d}",
     ]
-    if health.refresh_off:
+    if health.refresh_off and health.last_catch_up is not None:
+        lines.append(
+            f"  refresh off       {len(health.refresh_off):6d}  (serving the last cached or deploy-time copy; "
+            f"last catch-up {when(health.last_catch_up)}, {days_ago(health.last_catch_up)})"
+        )
+    elif health.refresh_off:
         lines.append(f"  refresh off       {len(health.refresh_off):6d}  (serving the last cached or deploy-time copy)")
     quiet_days = health.email_quiet_after_seconds / 86400
     if health.email:
         lines.append(f"  email             {len(health.email):6d}  ({len(health.email_quiet)} with no mail in {quiet_days:g} days)")
+
+    if health.catch_up_due:
+        lines.extend(
+            [
+                "",
+                f"Catch-up due: refresh-off feeds were last rebuilt {days_ago(health.last_catch_up)}. "
+                "Run ./scripts/netnewswire_workflow.sh catch-up from a network the upstream still answers.",
+            ]
+        )
 
     def section(title: str, rows: List[str]) -> None:
         if not rows:
@@ -208,6 +257,13 @@ def format_bridge_health(health: BridgeHealth, list_limit: int = DEFAULT_LIST_LI
         [f"{source_id}\t{when(last_success)}" for source_id, last_success in sorted(health.stale, key=lambda row: (row[1] or 0, row[0]))],
     )
     section("Never attempted; serving the deploy-time copy if there is one", health.never_attempted)
+    section(
+        "Refresh off and missed by the last catch-up; serving an older copy",
+        [
+            f"{source_id}\t{when(built_at) if built_at is not None else 'no build date'}"
+            for source_id, built_at in sorted(health.missed_catch_up, key=lambda row: (row[1] or 0, row[0]))
+        ],
+    )
     quiet = set(health.email_quiet)
     section(
         f"Email, last mail received; quiet means none in {quiet_days:g} days, which is not a failure",

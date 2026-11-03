@@ -129,6 +129,43 @@ class SummaryTests(unittest.TestCase):
         self.assertTrue(health.has_problems)
         self.assertIn("  refresh off            3  (serving the last cached or deploy-time copy)", report)
 
+    def test_refresh_off_reports_the_last_catch_up_and_what_it_missed(self) -> None:
+        ids = ["bandcamp-a", "bandcamp-b", "bandcamp-failing", "bandcamp-undated"]
+        built = {"bandcamp-a": NOW - 3 * DAY, "bandcamp-b": NOW - 3 * DAY - HOUR, "bandcamp-failing": NOW - 70 * DAY}
+
+        health = summarize_bridge_health(ids, {}, {}, set(ids), NOW, 12 * HOUR, refresh_off=set(ids), built=built)
+        report = format_bridge_health(health)
+
+        self.assertEqual(health.last_catch_up, NOW - 3 * DAY)
+        self.assertEqual(health.missed_catch_up, [("bandcamp-failing", NOW - 70 * DAY), ("bandcamp-undated", None)])
+        self.assertFalse(health.catch_up_due)
+        self.assertFalse(health.has_problems)
+        self.assertIn("refresh off            4  (serving the last cached or deploy-time copy; last catch-up 2027-01-12, 3 days ago)", report)
+        self.assertNotIn("Catch-up due", report)
+        self.assertIn("Refresh off and missed by the last catch-up; serving an older copy (2):", report)
+        self.assertIn("  bandcamp-undated\tno build date\n  bandcamp-failing\t2026-11-06\n", report)
+
+    def test_a_catch_up_is_due_after_two_weeks(self) -> None:
+        built = {"bandcamp-a": NOW - 15 * DAY}
+
+        health = summarize_bridge_health(["bandcamp-a"], {}, {}, {"bandcamp-a"}, NOW, 12 * HOUR, refresh_off={"bandcamp-a"}, built=built)
+        report = format_bridge_health(health)
+
+        self.assertTrue(health.catch_up_due)
+        self.assertIn("Catch-up due: refresh-off feeds were last rebuilt 15 days ago.", report)
+        self.assertIn("./scripts/netnewswire_workflow.sh catch-up", report)
+        self.assertEqual(health.missed_catch_up, [])
+
+        sooner = summarize_bridge_health(["bandcamp-a"], {}, {}, {"bandcamp-a"}, NOW, 12 * HOUR, refresh_off={"bandcamp-a"}, built=built, catch_up_due_days=30)
+        self.assertFalse(sooner.catch_up_due)
+
+    def test_without_build_dates_the_refresh_off_line_is_unchanged(self) -> None:
+        health = summarize_bridge_health(["bandcamp-a"], {}, {}, {"bandcamp-a"}, NOW, 12 * HOUR, refresh_off={"bandcamp-a"})
+
+        self.assertIsNone(health.last_catch_up)
+        self.assertFalse(health.catch_up_due)
+        self.assertIn("  refresh off            1  (serving the last cached or deploy-time copy)\n", format_bridge_health(health))
+
     def test_email_sources_are_listed_by_last_mail_and_quiet_is_not_a_problem(self) -> None:
         health = summarize_bridge_health(
             ["email-recent", "email-quiet", "email-new", "nts-ok"],

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import timezone
@@ -17,6 +18,7 @@ DEFAULT_MAX_REFRESH_SOURCES_PER_RUN = 20
 MAX_SAFE_REFRESH_SOURCES_PER_RUN = 25
 DEFAULT_MAX_RSS_ITEMS_PER_SOURCE = 50
 BANDCAMP_REFRESH_SETTING = "RSS_BRIDGE_BANDCAMP_REFRESH"
+_LAST_BUILD_DATE = re.compile(r"<lastBuildDate>\s*([^<]+?)\s*</lastBuildDate>")
 
 
 class FeedWaitingForRefresh(Exception):
@@ -53,6 +55,25 @@ def served_copy(cached: Optional[str], seeded: Optional[str]) -> Optional[str]:
     if cached_built is not None and seeded_built is not None and seeded_built > cached_built:
         return seeded
     return cached
+
+
+def last_build_timestamp(rss_head: str) -> Optional[float]:
+    """The channel's lastBuildDate as a timestamp, or None.
+
+    Reads the first lastBuildDate in the text. Items never carry one and the
+    channel's comes before them, so the first few kilobytes of a feed are
+    enough, and a caller checking every feed need not parse each one whole.
+    """
+    match = _LAST_BUILD_DATE.search(rss_head or "")
+    if not match:
+        return None
+    try:
+        built = parse_internet_date(match.group(1))
+    except ValueError:
+        return None
+    if built.tzinfo is None:
+        built = built.replace(tzinfo=timezone.utc)
+    return built.timestamp()
 
 
 def _last_build_timestamp(rss: str) -> Optional[float]:

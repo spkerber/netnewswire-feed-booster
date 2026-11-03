@@ -55,7 +55,8 @@ It makes public network requests to validate the five direct feeds and generate 
 | Keep a portable source registry yourself | [Terminal workflow](docs/setup.md#terminal-workflow) | Git and Python 3.9+ |
 | Set up or migrate with a local coding agent | [Agent-assisted workflow](docs/agent-assisted-setup.md) | A local clone and a coding harness |
 | Import subscriptions from platforms | [What goes in `imports/`](imports/README.md) | An OPML file, a supported export, or public URLs |
-| Add Bandcamp, NTS, Mixcloud, or a supported webpage recipe | [Generated feeds](docs/source-types.md#generated-rss) | Terminal or local coding agent; optional HTTPS host |
+| Add Bandcamp, NTS, Mixcloud, or a supported webpage recipe | [Generated feeds](docs/source-types.md#generated-rss) | Terminal or local coding agent |
+| Keep generated feeds current, on one Mac or on every device | [Two setups](#two-setups-for-generated-feeds) | Nothing more for one Mac; a Modal account for every device |
 
 Start with NetNewsWire's [download page](https://netnewswire.com/). Choose `On My Mac` for a single-Mac trial or an isolated migration. Choose `iCloud` only when you are ready to sync subscriptions and reading state between Apple devices. NetNewsWire’s [getting-started guide](https://netnewswire.com/help/mac/6.1/en/getting-started.html) explains both account choices.
 
@@ -76,8 +77,8 @@ Anything 3.9 or later and you are done. If you are below it, or on a system with
 | Starter import, registry, OPML export, generated feeds | Python 3.9+, which macOS already has |
 | Double-clicking `Build Starter Import.command` | macOS with Finder |
 | `git clone` and the `make` shortcuts | Git, GNU Make, and Bash |
-| Hosting generated feeds so they refresh on their own | The optional `modal` extra, below |
-| `scripts/verify_public_template.sh` before publishing a clone | [ripgrep](https://github.com/BurntSushi/ripgrep) (`rg`) |
+| Serving generated feeds to every device (the hosted bridge) | The optional `modal` extra, below |
+| `scripts/verify_public_template.sh` before publishing a clone | Git; its other tools ship with macOS and Linux |
 
 The test suite runs on Python 3.9 and 3.13 on Linux and on Python 3.13 on macOS. Anything in that range behaves the same.
 
@@ -126,11 +127,29 @@ Review the candidate before importing it back into NetNewsWire. The full, visual
 
 Most of what you'll add — podcasts, Substack newsletters, YouTube channels, SoundCloud profiles — already publishes its own real RSS feed. NetNewsWire reads that feed straight from the publisher, on its own schedule, on every device you use. This tool never touches the content in between. When a real feed like this exists, it's always what gets used.
 
-A few platforms never publish a real feed at all — Bandcamp is the main one, along with NTS and Mixcloud. For those, this tool builds one for you: it reads the public page and writes a small RSS file. That file works immediately, for free, with no extra setup — NetNewsWire can read it right away. The catch is that a file on your Mac only exists on your Mac. It won't show up in NetNewsWire on your iPhone, and it won't update itself; you have to re-run the tool to refresh it.
+A few platforms never publish a real feed at all — Bandcamp is the main one, along with NTS and Mixcloud. For those, this tool builds one for you: it reads the public page and writes a small RSS file. That file works immediately, for free, with no extra setup — NetNewsWire can read it right away. A generated feed changes only when something rebuilds it, so the question is what rebuilds it, and where you read it.
 
-If you want one of those generated feeds to update on its own and reach your other devices — the way a real feed does — the file needs to live somewhere with a public web address instead of just on your hard drive. That's what the **hosted bridge** is: the same feed-building logic, running continuously on a small cloud service (this project uses [Modal](docs/hosting.md)) instead of your Mac, refreshing itself on a schedule and serving a normal `https://` URL that any device can reach. It's entirely optional, costs a small amount if you turn it on, and you don't need it at all if you only ever read on one Mac.
+### Two Setups For Generated Feeds
 
-See [Source Types](docs/source-types.md) for exactly which platforms fall into each category, and [Hosted Bridge](docs/hosting.md) if you decide you want the cloud option.
+Pick the one that matches how you read. Both are complete, and you can move from the first to the second later without losing anything.
+
+| | Mac only | Hosted bridge |
+| --- | --- | --- |
+| Where you read generated feeds | NetNewsWire on this Mac | NetNewsWire on every device, at an `https://` address |
+| What you need | Nothing beyond this tool | A [Modal](docs/hosting.md) account, set up once; it costs a small amount |
+| How Bandcamp feeds stay current | You run `refresh-local` when you want new releases | You run `catch-up` from your Mac now and then, because Bandcamp blocks cloud hosts |
+| How the other generated feeds stay current | `refresh-local` rebuilds them too | The bridge refreshes them on a schedule, twice a day by default |
+| How you check on them | `status` | `status`, which also shows `bridge-health` |
+
+Every command above is a mode of `./scripts/netnewswire_workflow.sh`. Run `./scripts/netnewswire_workflow.sh help` for the full list.
+
+**Mac only.** Generated feeds are files in `exports/`, and NetNewsWire reads them straight from disk. Run `refresh-local` every week or two, or whenever you want new releases: it rebuilds every generated feed from your own connection, and NetNewsWire picks up the new files at its next refresh. The catch is that the files exist only on this Mac, so these feeds won't appear in NetNewsWire on your iPhone.
+
+**Hosted bridge.** The same feed-building logic runs on a small cloud service (this project uses Modal) and serves each generated feed at a normal `https://` URL any device can reach. It refreshes NTS, Mixcloud, and webpage-recipe feeds on a schedule. Bandcamp is the exception: since October 2026 it answers every request from Modal with a bot check, and this tool never tries to get past one. So the bridge leaves Bandcamp alone, and `catch-up` rebuilds those feeds on your Mac and deploys them. Every two weeks or so is plenty. `bridge-health` tells you when one is due, and lists any Bandcamp feed the last catch-up couldn't rebuild.
+
+**Email intake (optional, future).** Some newsletters have no RSS at all. Groundwork for turning their emails into feeds served by the bridge is in place, but the piece that delivers mail to it is not, so it can't be used yet. Neither setup above needs it. Until it lands, a hosted email-to-feed service such as [Kill the Newsletter](https://kill-the-newsletter.com/) does this with no setup. See [Email Sources](docs/hosting.md#email-sources-optional-future).
+
+See [Source Types](docs/source-types.md) for which platforms fall into each category, [Operations](docs/operations.md) for the routine in each setup, and [Hosted Bridge](docs/hosting.md) if you want the cloud option.
 
 ## Privacy Boundary
 
@@ -165,12 +184,12 @@ See [Public Release](docs/public-release.md) for the full release checklist.
 - [First Import](docs/first-feed.md): public starter report, one-feed fallback, import success check, troubleshooting, and FAQ.
 - [Collect Sources](docs/source-collection.md): existing OPML, YouTube exports and URLs, Bandcamp, podcasts, Substack, and supported input formats.
 - [Agent-Assisted Setup](docs/agent-assisted-setup.md): a safe handoff prompt and approval boundaries for local coding harnesses.
-- [Operations](docs/operations.md): daily, weekly, and occasional maintenance routines.
+- [Operations](docs/operations.md): daily, weekly, and occasional maintenance routines, including keeping generated feeds current in each setup.
 - [Source Types](docs/source-types.md): direct feeds versus generated RSS.
 - [Slow Reading And Refresh Policy](docs/reading-practice.md): cadence, capacity, storage, and tuning tradeoffs.
 - [Writing A Source Adapter](docs/writing-a-source-adapter.md): security and testing contract for a new generated source type.
 - [Writing A Direct Feed Source](docs/writing-a-direct-feed-source.md): the equivalent contract for a source with its own native feed URL — YouTube, SoundCloud, Substack, Podcasts.
-- [Hosted Bridge](docs/hosting.md): tokenized generated feeds and supported host options.
+- [Hosted Bridge](docs/hosting.md): tokenized generated feeds, supported host options, Bandcamp catch-up, and the optional email intake planned for later.
 - [Contributing](CONTRIBUTING.md): scope and privacy requirements for contributors, and how `batch-subscribe` dispatches.
 - [Changelog](CHANGELOG.md): what changed in each release, including upgrade notes.
 

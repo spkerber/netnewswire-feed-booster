@@ -353,10 +353,35 @@ def _bridge_health_text() -> str:
                 states[path.stem] = parse_refresh_state(path.read_text(encoding="utf-8"))
     cached = {path.stem: path.stat().st_mtime for path in CACHE_DIR.glob("*.rss")} if CACHE_DIR.exists() else {}
     seeded = {path.stem for path in SEED_DIR.glob("*.rss")} if SEED_DIR.exists() else set()
+    # A refresh-off feed moves only when a catch-up redeploys it, so report how
+    # old the copy it serves is: the newer of the cached and deploy-time builds.
+    built = {}
+    for source_id in refresh_off:
+        times = [stamp for stamp in (_build_time(_cache_path(source_id)), _build_time(_seed_path(source_id))) if stamp is not None]
+        if times:
+            built[source_id] = max(times)
     health = summarize_bridge_health(
-        source_ids, states, cached, seeded, time.time(), REFRESH_INTERVAL_SECONDS, refresh_off=refresh_off, email=email_ids
+        source_ids,
+        states,
+        cached,
+        seeded,
+        time.time(),
+        REFRESH_INTERVAL_SECONDS,
+        refresh_off=refresh_off,
+        email=email_ids,
+        built=built,
     )
     return format_bridge_health(health)
+
+
+def _build_time(path: Path) -> Optional[float]:
+    from netnewswire_feed_booster.bridge_policy import last_build_timestamp
+
+    try:
+        with path.open(encoding="utf-8", errors="replace") as handle:
+            return last_build_timestamp(handle.read(4096))
+    except FileNotFoundError:
+        return None
 
 
 def _active_generated_source_ids() -> set[str]:
