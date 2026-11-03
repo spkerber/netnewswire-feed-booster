@@ -1,0 +1,57 @@
+Authentication-Results: mx.cloudflare.net;
+	dkim=pass header.d=news.example.net header.s=s1 header.b=AbCdEf12;
+	dmarc=pass header.from=news.example.net policy.dmarc=reject;
+	spf=pass (mx.cloudflare.net: domain of bounce@mail.news.example.net designates 192.0.2.10 as permitted sender) smtp.mailfrom=bounce@mail.news.example.net;
+	arc=none smtp.remote-ip=192.0.2.10
+Received: from mail.news.example.net (mail.news.example.net [192.0.2.10])
+	by mx.cloudflare.net for <inbox+weekly-notes-0123456789abcdef@feeds.example.com>; Mon, 02 Nov 2026 14:00:01 +0000
+X-Forwarded-For: reader@example.org inbox+weekly-notes-0123456789abcdef@feeds.example.com
+X-Forwarded-To: inbox+weekly-notes-0123456789abcdef@feeds.example.com
+Delivered-To: reader@example.org
+X-Fixture-Raw-Only: raw-header-marker-7f3a
+From: Weekly Notes <hello@news.example.net>
+To: Reader <reader@example.org>
+Subject: Weekly Notes #42 for reader@example.org
+Date: Mon, 02 Nov 2026 14:00:00 +0000
+Message-ID: <fixture-weekly-42@news.example.net>
+List-Unsubscribe: <https://news.example.net/l/abc123>, <mailto:leave@news.example.net?subject=leave>
+List-Unsubscribe-Post: List-Unsubscribe=One-Click
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="fixture-boundary"
+
+--fixture-boundary
+Content-Type: text/plain; charset=utf-8
+
+Weekly Notes #42
+Read the lead story: https://news.example.net/stories/42
+Plain-part-only marker: plain-part-marker-5c1d
+
+--fixture-boundary
+Content-Type: text/html; charset=utf-8
+
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Weekly Notes head title</title>
+<style>.hidden { display: none } .tracker { background: url(https://tracker.example.com/css.gif) }</style>
+<script>trackOpen("script-body-marker")</script></head>
+<body onload="trackOpen()">
+<table width="100%" bgcolor="#ffffff" background="https://news.example.net/bg.png"><tr><td style="padding:0">
+<p class="preheader" style="display:none">Hi reader@example.org, this week in notes</p>
+<h1>Weekly Notes #42</h1>
+<p><a href="https://news.example.net/stories/42?utm_source=newsletter&amp;utm_medium=email&amp;ref=home" onclick="trackClick()">Read the lead story</a></p>
+<p><img src="https://images.news.example.net/covers/42.jpg" width="600" height="300" alt="Cover art"></p>
+<p><img src="https://tracker.example.com/banner.png" alt="Sponsor"></p>
+<p>Shared with <a href="mailto:reader@example.org">reader@example.org</a> and INBOX+WEEKLY-NOTES-0123456789ABCDEF@FEEDS.EXAMPLE.COM.</p>
+<p><a href="https://news.example.net/view?u=aW5ib3grd2Vla2x5LW5vdGVzLTAxMjM0NTY3ODlhYmNkZWZAZmVlZHMuZXhhbXBsZS5jb20">View this email in your browser</a></p>
+<form action="https://news.example.net/poll"><p>Vote:</p><input type="radio" name="vote"><button>Vote now</button></form>
+<iframe src="https://news.example.net/embed">iframe-body-marker</iframe>
+<p>You received this email because you subscribed. <a href="https://click.news.example.net/c/xyz">Unsubscribe</a> | <a href="https://news.example.net/settings">Settings</a></p>
+<p>To stop these emails, <a href="https://click.news.example.net/c/opaque123">click here</a>.</p>
+<p><a href="https://news.example.net/l/abc123">Leave</a></p>
+<p><a href="https://news.example.net/account/delete">Goodbye</a></p>
+<p><a href="javascript:alert(1)">Script link</a></p>
+<img src="https://images.news.example.net/open/42.gif" width="1" height="1" alt="">
+<img src="https://ct.sendgrid.net/wf/open?upn=xyz" width="1" height="1">
+</td></tr></table>
+</body></html>
+
+--fixture-boundary--

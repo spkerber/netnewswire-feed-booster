@@ -3,9 +3,11 @@ from __future__ import annotations
 # The filename is retained for existing deployment commands; the app serves every
 # registered generated adapter, not only Bandcamp sources.
 
+import functools
 import hmac
 import json
 import os
+import shutil
 import time
 from pathlib import Path
 from typing import Optional
@@ -28,6 +30,9 @@ CACHE_ROOT = Path("/cache")
 CACHE_DIR = CACHE_ROOT / "generated"
 VALIDATOR_DIR = CACHE_ROOT / "validators"
 REFRESH_STATE_DIR = CACHE_ROOT / "refresh-state"
+# Sanitized items from accepted mail, one directory per email source. The raw
+# message is never written anywhere.
+EMAIL_ITEM_DIR = CACHE_ROOT / "email"
 FAN_MAX_ITEMS = 40
 FULL_FAN_SOURCE_IDS = {
     source_id.strip()
@@ -43,6 +48,8 @@ MAX_RSS_ITEMS_PER_SOURCE = int(os.environ.get("RSS_MAX_ITEMS_PER_SOURCE", "50"))
 # answers with a bot check. Bandcamp feeds then serve their last cached or
 # deploy-time copy. Baked into the image so every function sees the same value.
 BANDCAMP_REFRESH = os.environ.get("RSS_BRIDGE_BANDCAMP_REFRESH", "").strip().lower() or "on"
+# Largest message /inbound/email accepts, in bytes. Baked in like the setting above.
+INBOUND_EMAIL_MAX_BYTES = int(os.environ.get("RSS_INBOUND_EMAIL_MAX_BYTES", "").strip() or str(2 * 1024 * 1024))
 OPEN_FILES_CONFLICT = "open files preventing the operation"
 READER_CACHE_CONTROL = "private, max-age=3600, stale-if-error=21600"
 
@@ -56,12 +63,21 @@ if MAX_RSS_ITEMS_PER_SOURCE < 1:
     raise ValueError("RSS_MAX_ITEMS_PER_SOURCE must be positive")
 if BANDCAMP_REFRESH not in {"on", "off"}:
     raise ValueError("RSS_BRIDGE_BANDCAMP_REFRESH must be on or off")
+if INBOUND_EMAIL_MAX_BYTES < 1024:
+    raise ValueError("RSS_INBOUND_EMAIL_MAX_BYTES must be at least 1024")
 
 
 image = (
     modal.Image.debian_slim(python_version="3.11")
     .pip_install("fastapi[standard]")
-    .env({"PYTHONPATH": "/root/src", "RSS_PROFILE": RSS_PROFILE, "RSS_BRIDGE_BANDCAMP_REFRESH": BANDCAMP_REFRESH})
+    .env(
+        {
+            "PYTHONPATH": "/root/src",
+            "RSS_PROFILE": RSS_PROFILE,
+            "RSS_BRIDGE_BANDCAMP_REFRESH": BANDCAMP_REFRESH,
+            "RSS_INBOUND_EMAIL_MAX_BYTES": str(INBOUND_EMAIL_MAX_BYTES),
+        }
+    )
     .add_local_dir("src/netnewswire_feed_booster", "/root/src/netnewswire_feed_booster")
     .add_local_file(LOCAL_DATA_PATH, "/root/data/sources.json")
     .add_local_dir("exports/generated", "/root/seed/generated")
@@ -132,6 +148,11 @@ def _configured_feed_token() -> str:
 def _token_is_valid(value: str) -> bool:
     expected = _configured_feed_token()
     return bool(expected) and hmac.compare_digest(value, expected)
+
+
+def _configured_inbound_secret() -> str:
+    # From the Modal secret only; never baked into the image.
+    return os.environ.get("RSS_INBOUND_EMAIL_SECRET", "").strip()
 
 
 def _ensure_rss(rss: str) -> str:
@@ -253,6 +274,37 @@ def _refresh_generated_source(source) -> str:
     return rss
 
 
+@functools.lru_cache(maxsize=1)
+def _email_sources_by_address() -> dict:
+    # The registry ships with the image and never changes in a running container.
+    from netnewswire_feed_booster.email_feeds import email_sources_by_address
+
+    return email_sources_by_address(_active_sources_for_route("generated"))
+
+
+def _accept_inbound_email(raw: bytes, recipient: str, source):
+    from netnewswire_feed_booster.email_feeds import accept_inbound_email, normalize_recipient
+
+    now = time.time()
+    _reload_cache_volume()
+    accepted = accept_inbound_email(
+        raw,
+        normalize_recipient(recipient),
+        source,
+        EMAIL_ITEM_DIR,
+        CACHE_DIR,
+        now,
+        MAX_RSS_ITEMS_PER_SOURCE,
+        INBOUND_EMAIL_MAX_BYTES,
+    )
+    if not accepted.duplicate:
+        # An accepted message is an email source's refresh: the health page
+        # reads its last success as the time of the last mail.
+        _record_refresh(source.id, now)
+        cache_volume.commit()
+    return accepted
+
+
 def _refresh_state_path(source_id: str) -> Path:
     from netnewswire_feed_booster.rss_safety import validate_source_id
 
@@ -283,7 +335,7 @@ def _record_refresh(source_id: str, now: float, error: Optional[BaseException] =
 
 def _bridge_health_text() -> str:
     from netnewswire_feed_booster.bridge_health import format_bridge_health, parse_refresh_state, summarize_bridge_health
-    from netnewswire_feed_booster.generated_adapters import BANDCAMP_ADAPTER, adapter_for_source
+    from netnewswire_feed_booster.generated_adapters import BANDCAMP_ADAPTER, EMAIL_ADAPTER, adapter_for_source
 
     _reload_cache_volume()
     sources = _active_sources_for_route("generated")
@@ -293,6 +345,7 @@ def _bridge_health_text() -> str:
         if BANDCAMP_REFRESH == "off"
         else set()
     )
+    email_ids = {source.id for source in sources if adapter_for_source(source) is EMAIL_ADAPTER}
     states = {}
     if REFRESH_STATE_DIR.exists():
         for path in REFRESH_STATE_DIR.glob("*.json"):
@@ -301,7 +354,7 @@ def _bridge_health_text() -> str:
     cached = {path.stem: path.stat().st_mtime for path in CACHE_DIR.glob("*.rss")} if CACHE_DIR.exists() else {}
     seeded = {path.stem for path in SEED_DIR.glob("*.rss")} if SEED_DIR.exists() else set()
     health = summarize_bridge_health(
-        source_ids, states, cached, seeded, time.time(), REFRESH_INTERVAL_SECONDS, refresh_off=refresh_off
+        source_ids, states, cached, seeded, time.time(), REFRESH_INTERVAL_SECONDS, refresh_off=refresh_off, email=email_ids
     )
     return format_bridge_health(health)
 
@@ -331,7 +384,22 @@ def _prune_retired_cache_files() -> int:
             if path.stem not in active_ids:
                 path.unlink()
                 removed += 1
+    # Received mail is the only copy of an email feed's items, so they go when
+    # the source leaves the registry, not when it is paused.
+    if EMAIL_ITEM_DIR.exists():
+        registered = _registered_email_source_ids()
+        for path in EMAIL_ITEM_DIR.iterdir():
+            if path.is_dir() and path.name not in registered:
+                shutil.rmtree(path)
+                removed += 1
     return removed
+
+
+def _registered_email_source_ids() -> set[str]:
+    from netnewswire_feed_booster.email_feeds import EMAIL_SOURCE_LABEL
+    from netnewswire_feed_booster.feed_store import FeedStore
+
+    return {source.id for source in FeedStore(DATA_PATH).sources() if source.source == EMAIL_SOURCE_LABEL}
 
 
 def _read_cached_or_seeded_rss(source_id: str) -> Optional[str]:
@@ -351,8 +419,16 @@ def _read_cached_or_seeded_rss(source_id: str) -> Optional[str]:
 @modal.asgi_app()
 def web():
     from fastapi import FastAPI, HTTPException
-    from fastapi.responses import PlainTextResponse, Response
+    from fastapi.concurrency import run_in_threadpool
+    from fastapi.responses import JSONResponse, PlainTextResponse, Response
     from netnewswire_feed_booster.bridge_policy import FeedWaitingForRefresh, require_cached_feed
+    from netnewswire_feed_booster.email_feeds import (
+        InboundRejected,
+        read_capped_body,
+        require_declared_size,
+        require_email_source,
+        require_inbound_secret,
+    )
 
     web_app = FastAPI(title=f"{APP_NAME} RSS bridge")
 
@@ -392,6 +468,27 @@ def web():
             raise HTTPException(status_code=404, detail="Unknown feed")
         return PlainTextResponse(_bridge_health_text(), headers={"Cache-Control": "no-store"})
 
+    async def inbound_email(request):
+        # Outside /feeds/<token>/ and behind its own secret: the caller is the
+        # mail host's inbound hook, never a reader. See email_feeds.py.
+        try:
+            # The cheap checks come first; none of them reads the message.
+            require_inbound_secret(request.headers.get("authorization"), _configured_inbound_secret())
+            require_declared_size(request.headers.get("content-length"), INBOUND_EMAIL_MAX_BYTES)
+            recipient = request.headers.get("x-envelope-to", "")
+            source = require_email_source(recipient, _email_sources_by_address())
+            raw = await read_capped_body(request.stream(), INBOUND_EMAIL_MAX_BYTES)
+            accepted = await run_in_threadpool(_accept_inbound_email, raw, recipient, source)
+        except InboundRejected as rejection:
+            return JSONResponse({"detail": rejection.reason}, status_code=rejection.status, headers={"Cache-Control": "no-store"})
+        status = "duplicate" if accepted.duplicate else "accepted"
+        return JSONResponse({"status": status}, status_code=200 if accepted.duplicate else 202, headers={"Cache-Control": "no-store"})
+
+    # A plain Starlette route, handed the request itself. As a FastAPI route its
+    # `request: Request` parameter would read as a query parameter: annotations
+    # are strings in this module, and Request is not importable at module level.
+    web_app.add_route("/inbound/email", inbound_email, methods=["POST"])
+
     @web_app.get("/")
     def index():
         return PlainTextResponse("RSS feed bridge\n")
@@ -425,7 +522,12 @@ def refresh_bandcamp_cache() -> dict:
 def refresh_generated_cache() -> dict:
     from netnewswire_feed_booster.generated_adapters import BANDCAMP_ADAPTER, adapter_for_source
 
-    sources = [s for s in _active_sources_for_route("generated") if adapter_for_source(s) is not BANDCAMP_ADAPTER]
+    # Bandcamp has its own job, and email sources have nothing upstream to fetch.
+    sources = []
+    for source in _active_sources_for_route("generated"):
+        adapter = adapter_for_source(source)
+        if adapter is not BANDCAMP_ADAPTER and adapter.fetches_upstream:
+            sources.append(source)
     # Pruning covers every generated source, Bandcamp included. It runs here so
     # it keeps running when the Bandcamp refresh is off.
     return _refresh_due_sources(sources, _refresh_generated_source, prune_retired=True)

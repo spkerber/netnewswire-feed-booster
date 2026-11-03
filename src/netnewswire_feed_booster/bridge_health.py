@@ -20,6 +20,9 @@ from typing import Iterable, List, Mapping, Optional, Set, Tuple
 
 MAX_ERROR_CHARS = 160
 DEFAULT_STALE_AFTER_INTERVALS = 3
+# Newsletters and release emails come when they come, so a quiet email source
+# is information, not a failure. Past this, the report calls it quiet.
+DEFAULT_EMAIL_QUIET_DAYS = 30
 DEFAULT_LIST_LIMIT = 40
 _URL_PATTERN = re.compile(r"\bhttps?://\S+")
 
@@ -88,6 +91,10 @@ class BridgeHealth:
     seed_only: List[str] = field(default_factory=list)
     nothing_to_serve: List[str] = field(default_factory=list)
     refresh_off: List[str] = field(default_factory=list)
+    # Email sources: (source ID, time of the last accepted mail), and which are quiet.
+    email: List[Tuple[str, Optional[float]]] = field(default_factory=list)
+    email_quiet: List[str] = field(default_factory=list)
+    email_quiet_after_seconds: float = DEFAULT_EMAIL_QUIET_DAYS * 24 * 60 * 60
 
     @property
     def has_problems(self) -> bool:
@@ -103,6 +110,8 @@ def summarize_bridge_health(
     interval_seconds: float,
     stale_after_intervals: int = DEFAULT_STALE_AFTER_INTERVALS,
     refresh_off: Iterable[str] = (),
+    email: Iterable[str] = (),
+    email_quiet_days: float = DEFAULT_EMAIL_QUIET_DAYS,
 ) -> BridgeHealth:
     """Sort active generated sources by what a reader is actually getting.
 
@@ -113,17 +122,34 @@ def summarize_bridge_health(
     Sources in `refresh_off` belong to a route whose refresh is switched off.
     They still count toward nothing to serve and seed copy only, but not toward
     failing or stale: their last refresh outcome is history, not a live problem.
+
+    Sources in `email` are never refreshed; each accepted message records a
+    success instead. They are listed with their last mail, and called quiet
+    after `email_quiet_days` without one, but never failing or stale.
     """
     ids = sorted(set(source_ids))
     not_refreshed = set(refresh_off)
+    email_ids = set(email)
     stale_after = interval_seconds * stale_after_intervals
-    health = BridgeHealth(checked_at=now, interval_seconds=interval_seconds, stale_after_seconds=stale_after, total=len(ids))
+    health = BridgeHealth(
+        checked_at=now,
+        interval_seconds=interval_seconds,
+        stale_after_seconds=stale_after,
+        total=len(ids),
+        email_quiet_after_seconds=email_quiet_days * 24 * 60 * 60,
+    )
     for source_id in ids:
         state = states.get(source_id, RefreshState())
         if source_id not in cached and source_id not in seeded:
             health.nothing_to_serve.append(source_id)
         elif source_id not in cached:
             health.seed_only.append(source_id)
+        if source_id in email_ids:
+            last_mail = state.last_success
+            health.email.append((source_id, last_mail))
+            if last_mail is None or now - last_mail > health.email_quiet_after_seconds:
+                health.email_quiet.append(source_id)
+            continue
         if source_id in not_refreshed:
             health.refresh_off.append(source_id)
             continue
@@ -160,6 +186,9 @@ def format_bridge_health(health: BridgeHealth, list_limit: int = DEFAULT_LIST_LI
     ]
     if health.refresh_off:
         lines.append(f"  refresh off       {len(health.refresh_off):6d}  (serving the last cached or deploy-time copy)")
+    quiet_days = health.email_quiet_after_seconds / 86400
+    if health.email:
+        lines.append(f"  email             {len(health.email):6d}  ({len(health.email_quiet)} with no mail in {quiet_days:g} days)")
 
     def section(title: str, rows: List[str]) -> None:
         if not rows:
@@ -179,6 +208,14 @@ def format_bridge_health(health: BridgeHealth, list_limit: int = DEFAULT_LIST_LI
         [f"{source_id}\t{when(last_success)}" for source_id, last_success in sorted(health.stale, key=lambda row: (row[1] or 0, row[0]))],
     )
     section("Never attempted; serving the deploy-time copy if there is one", health.never_attempted)
+    quiet = set(health.email_quiet)
+    section(
+        f"Email, last mail received; quiet means none in {quiet_days:g} days, which is not a failure",
+        [
+            f"{source_id}\t{when(last_mail) if last_mail is not None else 'no mail yet'}" + ("\tquiet" if source_id in quiet else "")
+            for source_id, last_mail in sorted(health.email, key=lambda row: (row[1] or 0, row[0]))
+        ],
+    )
     return "\n".join(lines) + "\n"
 
 

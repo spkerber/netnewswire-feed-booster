@@ -25,7 +25,25 @@ from .batch_subscribe import (
 from .bandcamp_following import import_bandcamp_following
 from .bandcamp_sources import build_bandcamp_source_from_url
 from .subscription_history import SubscriptionHistoryStore, default_subscription_history_path
-from .feed_store import FeedStore, Source, default_private_sources_path, default_sources_path, normalize_url, slugify, source_id_from_title
+from .email_feeds import (
+    EMAIL_SOURCE_LABEL,
+    INBOUND_ADDRESS_SETTING,
+    new_inbound_address,
+    normalize_mail_domain,
+    parse_address_base,
+    render_email_feed_rss,
+)
+from .feed_store import (
+    EmailIntake,
+    FeedStore,
+    Source,
+    default_private_sources_path,
+    default_sources_path,
+    normalize_url,
+    slugify,
+    source_id_from_title,
+    unique_id,
+)
 from .feed_identity import (
     FeedIdentity,
     canonical_url,
@@ -43,7 +61,7 @@ from .feed_health import (
 )
 from .feed_validation import audit_source, audit_sources, discover_feed_url, validate_feed_text
 from .generated_migration import apply_generated_source_migration, plan_generated_source_migration
-from .generated_adapters import BANDCAMP_ADAPTER, NTS_ADAPTER, WEBPAGE_ADAPTER, adapter_for_source
+from .generated_adapters import BANDCAMP_ADAPTER, EMAIL_ADAPTER, NTS_ADAPTER, WEBPAGE_ADAPTER, adapter_for_source
 from .bridge_policy import (
     BANDCAMP_REFRESH_SETTING,
     DEFAULT_MAX_REFRESH_SOURCES_PER_RUN,
@@ -87,6 +105,7 @@ ADAPTER_KEY_BY_COMMAND = {
     "import-youtube-channel-url": "YOUTUBE",
     "import-youtube-subscriptions": "YOUTUBE",
     "subscribe-bandcamp-source": "BANDCAMP",
+    "subscribe-email-source": "EMAIL",
     "subscribe-mixcloud-profile": "MIXCLOUD",
     "subscribe-nts-show": "NTS",
     "subscribe-podcast": "PODCAST",
@@ -124,8 +143,9 @@ PLATFORM_GROUPS = {
 # to — Online Radio for one person, Archives or Music for another. So there is no
 # built-in default. Set RSS_DEFAULT_GROUP_NTS or RSS_DEFAULT_GROUP_WEBPAGE once
 # and every later subscribe inherits it; until then these land at the OPML root
-# with a note saying so.
-INDEPENDENT_SITE_KEYS = frozenset({"NTS", "WEBPAGE"})
+# with a note saying so. Email sources are newsletters from anyone, so they are
+# treated the same way (RSS_DEFAULT_GROUP_EMAIL).
+INDEPENDENT_SITE_KEYS = frozenset({"NTS", "WEBPAGE", "EMAIL"})
 
 # Direct-feed one-off fetches don't go through a GeneratedAdapter, so they don't
 # get its host allowlist for free. Restrict them here so a redirect can't carry
@@ -290,6 +310,40 @@ def build_parser() -> argparse.ArgumentParser:
     mixcloud_parser.add_argument("--profile", default=DEFAULT_PROFILE)
     mixcloud_parser.add_argument("--group", default="")
     mixcloud_parser.add_argument("--out-dir", type=Path, default=Path("exports/generated"))
+
+    email_parser = subparsers.add_parser(
+        "subscribe-email-source",
+        help="Add a newsletter that arrives by email: generate its private address and an empty feed",
+        description=(
+            "Add an email source: mail sent to its own address becomes items in a feed the hosted bridge serves. "
+            "The address is printed once and kept only in the private registry. Redeploy afterwards, because "
+            "the bridge reads the registry shipped with each deploy."
+        ),
+    )
+    email_parser.add_argument("--title", required=True)
+    email_parser.add_argument(
+        "--sender-domain",
+        action="append",
+        required=True,
+        help="Domain allowed to send this source's mail, subdomains included; repeat for more. The mail host must authenticate it.",
+    )
+    email_parser.add_argument(
+        "--image-host",
+        action="append",
+        default=[],
+        help="Host whose remote images may stay in items, subdomains included; repeat for more. Every other remote image is removed.",
+    )
+    email_parser.add_argument("--site-url", default="", help="The newsletter's home page, used as the feed's link")
+    email_parser.add_argument("--profile", default=DEFAULT_PROFILE)
+    email_parser.add_argument("--group", default="")
+    email_parser.add_argument(
+        "--address-base",
+        default="",
+        help=f"The routed address subaddresses hang off, such as inbox@feeds.example.com (default: {INBOUND_ADDRESS_SETTING})",
+    )
+    email_parser.add_argument("--new-address", action="store_true", help="Replace an existing source's address; the old one stops working after the next deploy")
+    email_parser.add_argument("--out-dir", type=Path, default=Path("exports/generated"))
+    email_parser.add_argument("--show-sensitive", action="store_true", help="Print the address even when it is unchanged")
 
     bandcamp_local_parser = subparsers.add_parser("refresh-bandcamp-local-feeds", help="Generate local RSS files for all saved Bandcamp artist and fan sources")
     bandcamp_local_parser.add_argument("--profile", default=DEFAULT_PROFILE)
@@ -947,7 +1001,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         for source in sources:
             groups = ", ".join(source.groups) if source.groups else "-"
             feed_url = display_feed_url(source, args.show_sensitive)
-            print(f"{source.id}\t{source.status}\t{source.kind}\t{groups}\t{source.title}\t{feed_url}")
+            # An email source's address is as private as a tokenized feed URL.
+            address = f"\t{source.email.address}" if args.show_sensitive and source.email else ""
+            print(f"{source.id}\t{source.status}\t{source.kind}\t{groups}\t{source.title}\t{feed_url}{address}")
         print(f"{len(sources)} sources")
         return 0
 
@@ -1230,6 +1286,76 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"Subscribed Mixcloud profile {changed_id}.")
         return 0
 
+    if args.command == "subscribe-email-source":
+        address_base = args.address_base or os.environ.get(INBOUND_ADDRESS_SETTING, "")
+        if not address_base:
+            parser.error(
+                f"Set {INBOUND_ADDRESS_SETTING} in data/private.env (the routed address on your mail subdomain, "
+                "such as inbox@feeds.example.com) or pass --address-base."
+            )
+        try:
+            _local_base, mail_domain = parse_address_base(address_base)
+            sender_domains = sorted({normalize_mail_domain(value) for value in args.sender_domain})
+            image_hosts = sorted({normalize_mail_domain(value) for value in args.image_host})
+        except ValueError as error:
+            parser.error(str(error))
+        if mail_domain.count(".") < 2:
+            print(
+                f"{mail_domain} looks like a whole domain. Run mail routing on a subdomain kept for feeds, "
+                "so mail to your own addresses never passes through the bridge.",
+                file=sys.stderr,
+            )
+
+        source = Source(
+            id=f"email-{source_id_from_title(args.title, args.title)}",
+            title=args.title,
+            feed_url="",
+            site_url=normalize_url(args.site_url) if args.site_url else "",
+            kind="newsletter",
+            profiles=[args.profile],
+            groups=[args.group] if args.group else [],
+            status="active",
+            source=EMAIL_SOURCE_LABEL,
+        )
+        existing = store.source_by_id(source.id)
+        if existing is not None and existing.source != EMAIL_SOURCE_LABEL:
+            # Never merge into a different kind of source that happens to share the ID.
+            source.id = unique_id(source.id, {item.id for item in store.sources()})
+            existing = None
+        keep_address = existing is not None and existing.email is not None and not args.new_address
+        address = existing.email.address if keep_address else new_inbound_address(address_base, args.title)
+        if not image_hosts and existing is not None and existing.email is not None:
+            image_hosts = list(existing.email.image_hosts)
+        source.email = EmailIntake(address=address, sender_domains=sender_domains, image_hosts=image_hosts)
+
+        out_path = args.out_dir / f"{source.id}.rss"
+        source.feed_url = out_path.resolve().as_uri()
+        if not out_path.exists():
+            # An empty feed to seed the deploy, so the reader can subscribe before any mail arrives.
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(render_email_feed_rss(source, [], time.time()), encoding="utf-8")
+        changed_id = store.add_or_update(source)
+        store.set_status(changed_id, "active")
+        store.save()
+
+        print(f"Subscribed email source {changed_id}.")
+        if not keep_address or args.show_sensitive:
+            print(f"Address: {address}")
+        if not keep_address:
+            print(
+                "Give this address only to this source's sender. It is printed this once; "
+                "list --show-sensitive shows it again."
+            )
+            if existing is not None:
+                print("The previous address stops working at the next deploy.")
+        else:
+            print("Kept its existing address. Pass --new-address to replace it.")
+        print(
+            f"Senders: {', '.join(sender_domains)}. "
+            "Redeploy (deploy-modal) before mail arrives: the bridge reads the registry shipped with each deploy."
+        )
+        return 0
+
     if args.command == "refresh-bandcamp-local-feeds":
         updated = 0
         failed = 0
@@ -1321,6 +1447,9 @@ def main(argv: Optional[list[str]] = None) -> int:
             if adapter is None or adapter.hosted_route != "generated" or adapter is BANDCAMP_ADAPTER:
                 # Bandcamp shares the "generated" route but keeps its own refresh
                 # path (refresh-bandcamp-local-feeds) for fan-collection pagination.
+                continue
+            if not adapter.fetches_upstream:
+                # Email sources are built from mail the bridge receives.
                 continue
             try:
                 try:
@@ -1619,10 +1748,13 @@ def main(argv: Optional[list[str]] = None) -> int:
         # identity even though both now share one hosted_route.
         route_counts: Counter[str] = Counter()
         direct_count = 0
+        email_count = 0
         for source in store.active_sources(args.profile):
             adapter = adapter_for_source(source)
             if adapter is None:
                 direct_count += 1
+            elif adapter is EMAIL_ADAPTER:
+                email_count += 1
             elif adapter is BANDCAMP_ADAPTER:
                 route_counts["bandcamp"] += 1
             else:
@@ -1634,6 +1766,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             f"scheduler: every {args.schedule_hours}h; batch: {args.max_sources_per_run} sources"
         )
         print(f"Direct reader-managed feeds: {direct_count}")
+        if email_count:
+            print(f"email: {email_count} sources; mail arrives at the bridge, so nothing to refresh")
         has_capacity_gap = False
         for route in ("bandcamp", "generated"):
             if route == "bandcamp" and bandcamp_refresh == "off":
