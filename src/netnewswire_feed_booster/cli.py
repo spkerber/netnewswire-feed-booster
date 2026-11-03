@@ -45,12 +45,14 @@ from .feed_validation import audit_source, audit_sources, discover_feed_url, val
 from .generated_migration import apply_generated_source_migration, plan_generated_source_migration
 from .generated_adapters import BANDCAMP_ADAPTER, NTS_ADAPTER, WEBPAGE_ADAPTER, adapter_for_source
 from .bridge_policy import (
+    BANDCAMP_REFRESH_SETTING,
     DEFAULT_MAX_REFRESH_SOURCES_PER_RUN,
     DEFAULT_REFRESH_INTERVAL_SECONDS,
     DEFAULT_REFRESH_SCHEDULE_HOURS,
+    bandcamp_refresh_setting,
     refresh_route_plan,
 )
-from .hosted_bandcamp import bandcamp_fetch_url, bandcamp_items_for_source, sources_with_hosted_generated_feeds
+from .hosted_bandcamp import BandcampBotCheck, bandcamp_fetch_url, bandcamp_items_for_source, sources_with_hosted_generated_feeds
 from .hosted_bandcamp import render_bandcamp_source_rss
 from .nts import parse_nts_show_html
 from .mixcloud import mixcloud_source
@@ -518,6 +520,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-sources-per-run",
         type=int,
         default=int(os.environ.get("RSS_MAX_REFRESH_SOURCES_PER_RUN", str(DEFAULT_MAX_REFRESH_SOURCES_PER_RUN))),
+    )
+    # Checked when the command runs, so a mistyped setting can't break every other command.
+    refresh_plan_parser.add_argument(
+        "--bandcamp-refresh",
+        choices=["on", "off"],
+        default=os.environ.get(BANDCAMP_REFRESH_SETTING, ""),
+        help=f"Whether the hosted bridge refreshes Bandcamp sources (default: {BANDCAMP_REFRESH_SETTING}, else on)",
     )
 
     return parser
@@ -1235,6 +1244,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         bandcamp_sources.sort(key=lambda indexed_source: (indexed_source[1].id not in full_fan_source_ids, indexed_source[0]))
 
         processed = 0
+        bot_checked = False
         for _, source in bandcamp_sources:
             if source.source == "bandcamp-generated-music-feed":
                 continue
@@ -1267,6 +1277,12 @@ def main(argv: Optional[list[str]] = None) -> int:
                     source.notes = "Generated local RSS feed from the saved Bandcamp source page because OpenRSS did not mirror this Bandcamp feed reliably."
                     updated += 1
                     print(f"UPDATED\t{source.id}\t{len(items)} items")
+                except BandcampBotCheck:
+                    # Bandcamp answers every request from this network alike, so stop here.
+                    failed += 1
+                    bot_checked = True
+                    print(f"STOPPED\t{source.id}\tBandcamp served a bot check")
+                    break
                 except Exception as error:
                     failed += 1
                     detail = (
@@ -1288,6 +1304,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         store.save()
         print(f"Updated local Bandcamp feeds: {updated}")
         print(f"Failed local Bandcamp feeds: {failed}")
+        if bot_checked:
+            print("Stopped early: Bandcamp is answering this network with a bot check. Sources not reached keep their current feeds.")
+            return 1
         return 0
 
     if args.command == "refresh-generated-local-feeds":
@@ -1590,6 +1609,10 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 1 if any(health.is_problem for health in results) else 0
 
     if args.command == "refresh-plan":
+        try:
+            bandcamp_refresh = bandcamp_refresh_setting(args.bandcamp_refresh)
+        except ValueError as error:
+            parser.error(str(error))
         # Bandcamp and the rest of the "generated" route are scheduled and batched
         # independently (see refresh_bandcamp_cache/refresh_generated_cache in
         # modal_bandcamp_app.py), so the capacity report still splits on adapter
@@ -1613,6 +1636,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"Direct reader-managed feeds: {direct_count}")
         has_capacity_gap = False
         for route in ("bandcamp", "generated"):
+            if route == "bandcamp" and bandcamp_refresh == "off":
+                print(f"bandcamp: {route_counts[route]} sources; refresh off, serving the last cached or deploy-time copy")
+                continue
             plan = refresh_route_plan(
                 route,
                 route_counts[route],

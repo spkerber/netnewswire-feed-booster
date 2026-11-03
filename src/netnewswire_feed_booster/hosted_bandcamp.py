@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 from datetime import timezone
 from email.utils import parsedate_to_datetime
@@ -20,6 +21,22 @@ from .generated_adapters import hosted_route_for_source
 
 
 FetchText = Callable[[str], str]
+
+_BOT_CHECK_TITLE = re.compile(r"<title[^>]*>\s*Client Challenge\s*</title>", re.IGNORECASE)
+
+
+class BandcampBotCheck(ValueError):
+    """Bandcamp answered with its "Client Challenge" page instead of content.
+
+    The page arrives as HTTP 200, so without this check it parses as a page with
+    no releases. Bandcamp answers every request from a blocked network the same
+    way, so the right response is to stop requesting from it, never to get past
+    the check.
+    """
+
+
+def is_bandcamp_bot_check(html: str) -> bool:
+    return bool(_BOT_CHECK_TITLE.search(html))
 
 
 def hosted_generated_feed_url(base_url: str, source_id: str, token: str = "") -> str:
@@ -66,6 +83,8 @@ def bandcamp_items_for_source(
     post_band_details: Optional[PostBandDetails] = None,
 ) -> list:
     """Pass `post_band_details` to date an artist's releases (one extra request per artist)."""
+    if is_bandcamp_bot_check(html):
+        raise BandcampBotCheck(f"Bandcamp served a bot check instead of {source.id}: {source.site_url}")
     if is_bandcamp_artist_source(source):
         items = parse_bandcamp_artist_music_html(html, source.site_url)
         if post_band_details is not None:

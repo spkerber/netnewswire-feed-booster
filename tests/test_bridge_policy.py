@@ -1,10 +1,23 @@
 import unittest
 
 import isolated_env  # Clears private profile settings; keep above package imports.
-from netnewswire_feed_booster.bridge_policy import FeedWaitingForRefresh, due_sources, refresh_route_plan, require_cached_feed
+from netnewswire_feed_booster.bridge_policy import (
+    FeedWaitingForRefresh,
+    bandcamp_refresh_setting,
+    due_sources,
+    refresh_route_plan,
+    require_cached_feed,
+    served_copy,
+)
 
 
 HOUR = 60 * 60
+
+
+def built_rss(last_build_date: str = "") -> str:
+    build = f"<lastBuildDate>{last_build_date}</lastBuildDate>" if last_build_date else ""
+    return f'<?xml version="1.0" encoding="UTF-8"?>\n<rss version="2.0"><channel><title>Fixture</title>{build}</channel></rss>\n'
+
 
 class BridgePolicyTests(unittest.TestCase):
     def test_reader_request_never_falls_back_to_upstream_refresh(self) -> None:
@@ -12,6 +25,30 @@ class BridgePolicyTests(unittest.TestCase):
             require_cached_feed(None, "Bandcamp")
 
         self.assertEqual(require_cached_feed("<rss/>", "Bandcamp"), "<rss/>")
+
+    def test_the_cache_is_served_unless_the_deploy_shipped_a_newer_build(self) -> None:
+        october = built_rss("Thu, 01 Oct 2026 12:00:00 +0000")
+        november = built_rss("Mon, 02 Nov 2026 20:51:00 +0000")
+        undated = built_rss()
+
+        self.assertIsNone(served_copy(None, None))
+        self.assertEqual(served_copy(october, None), october)
+        self.assertEqual(served_copy(None, november), november)
+        # A local refresh plus a redeploy reaches readers past an older cache.
+        self.assertEqual(served_copy(october, november), november)
+        self.assertEqual(served_copy(november, october), november)
+        self.assertEqual(served_copy(november, november.replace("Fixture", "Seed")), november)
+        # Without a build date on both sides, the cache wins as it always has.
+        self.assertEqual(served_copy(undated, november), undated)
+        self.assertEqual(served_copy(october, undated), october)
+        self.assertEqual(served_copy(october, built_rss("not a date")), october)
+
+    def test_bandcamp_refresh_setting_is_on_unless_switched_off(self) -> None:
+        for value, expected in ((None, "on"), ("", "on"), (" ON ", "on"), ("off", "off"), ("Off", "off")):
+            with self.subTest(value=value):
+                self.assertEqual(bandcamp_refresh_setting(value), expected)
+        with self.assertRaisesRegex(ValueError, "RSS_BRIDGE_BANDCAMP_REFRESH must be on or off"):
+            bandcamp_refresh_setting("false")
 
     def test_due_source_selection_has_a_hard_per_run_limit(self) -> None:
         sources = ["one", "two", "three"]
