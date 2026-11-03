@@ -39,6 +39,10 @@ REFRESH_INTERVAL_SECONDS = int(os.environ.get("RSS_REFRESH_INTERVAL_SECONDS", st
 REFRESH_SCHEDULE_HOURS = int(os.environ.get("RSS_REFRESH_SCHEDULE_HOURS", "1"))
 MAX_REFRESH_SOURCES_PER_RUN = int(os.environ.get("RSS_MAX_REFRESH_SOURCES_PER_RUN", "20"))
 MAX_RSS_ITEMS_PER_SOURCE = int(os.environ.get("RSS_MAX_ITEMS_PER_SOURCE", "50"))
+# "off" stops the scheduled Bandcamp refresh, for a host whose network Bandcamp
+# answers with a bot check. Bandcamp feeds then serve their last cached or
+# deploy-time copy. Baked into the image so every function sees the same value.
+BANDCAMP_REFRESH = os.environ.get("RSS_BRIDGE_BANDCAMP_REFRESH", "").strip().lower() or "on"
 OPEN_FILES_CONFLICT = "open files preventing the operation"
 READER_CACHE_CONTROL = "private, max-age=3600, stale-if-error=21600"
 
@@ -50,12 +54,14 @@ if not 1 <= MAX_REFRESH_SOURCES_PER_RUN <= 25:
     raise ValueError("RSS_MAX_REFRESH_SOURCES_PER_RUN must be between 1 and 25")
 if MAX_RSS_ITEMS_PER_SOURCE < 1:
     raise ValueError("RSS_MAX_ITEMS_PER_SOURCE must be positive")
+if BANDCAMP_REFRESH not in {"on", "off"}:
+    raise ValueError("RSS_BRIDGE_BANDCAMP_REFRESH must be on or off")
 
 
 image = (
     modal.Image.debian_slim(python_version="3.11")
     .pip_install("fastapi[standard]")
-    .env({"PYTHONPATH": "/root/src", "RSS_PROFILE": RSS_PROFILE})
+    .env({"PYTHONPATH": "/root/src", "RSS_PROFILE": RSS_PROFILE, "RSS_BRIDGE_BANDCAMP_REFRESH": BANDCAMP_REFRESH})
     .add_local_dir("src/netnewswire_feed_booster", "/root/src/netnewswire_feed_booster")
     .add_local_file(LOCAL_DATA_PATH, "/root/data/sources.json")
     .add_local_dir("exports/generated", "/root/seed/generated")
@@ -277,9 +283,16 @@ def _record_refresh(source_id: str, now: float, error: Optional[BaseException] =
 
 def _bridge_health_text() -> str:
     from netnewswire_feed_booster.bridge_health import format_bridge_health, parse_refresh_state, summarize_bridge_health
+    from netnewswire_feed_booster.generated_adapters import BANDCAMP_ADAPTER, adapter_for_source
 
     _reload_cache_volume()
-    source_ids = {source.id for source in _active_sources_for_route("generated")}
+    sources = _active_sources_for_route("generated")
+    source_ids = {source.id for source in sources}
+    refresh_off = (
+        {source.id for source in sources if adapter_for_source(source) is BANDCAMP_ADAPTER}
+        if BANDCAMP_REFRESH == "off"
+        else set()
+    )
     states = {}
     if REFRESH_STATE_DIR.exists():
         for path in REFRESH_STATE_DIR.glob("*.json"):
@@ -287,7 +300,9 @@ def _bridge_health_text() -> str:
                 states[path.stem] = parse_refresh_state(path.read_text(encoding="utf-8"))
     cached = {path.stem: path.stat().st_mtime for path in CACHE_DIR.glob("*.rss")} if CACHE_DIR.exists() else {}
     seeded = {path.stem for path in SEED_DIR.glob("*.rss")} if SEED_DIR.exists() else set()
-    health = summarize_bridge_health(source_ids, states, cached, seeded, time.time(), REFRESH_INTERVAL_SECONDS)
+    health = summarize_bridge_health(
+        source_ids, states, cached, seeded, time.time(), REFRESH_INTERVAL_SECONDS, refresh_off=refresh_off
+    )
     return format_bridge_health(health)
 
 
@@ -320,18 +335,10 @@ def _prune_retired_cache_files() -> int:
 
 
 def _read_cached_or_seeded_rss(source_id: str) -> Optional[str]:
+    from netnewswire_feed_booster.bridge_policy import served_copy
+
     _reload_cache_volume()
-    path = _cache_path(source_id)
-    rss = _read_rss_file(path)
-    if rss is not None:
-        return rss
-
-    seed_path = _seed_path(source_id)
-    rss = _read_rss_file(seed_path)
-    if rss is not None:
-        return rss
-
-    return None
+    return served_copy(_read_rss_file(_cache_path(source_id)), _read_rss_file(_seed_path(source_id)))
 
 
 @app.function(
@@ -401,9 +408,12 @@ def web():
 )
 def refresh_bandcamp_cache() -> dict:
     from netnewswire_feed_booster.generated_adapters import BANDCAMP_ADAPTER, adapter_for_source
+    from netnewswire_feed_booster.hosted_bandcamp import BandcampBotCheck
 
+    if BANDCAMP_REFRESH == "off":
+        return {"skipped": "RSS_BRIDGE_BANDCAMP_REFRESH=off"}
     sources = [s for s in _active_sources_for_route("generated") if adapter_for_source(s) is BANDCAMP_ADAPTER]
-    return _refresh_due_sources(sources, _refresh_source, prune_retired=True)
+    return _refresh_due_sources(sources, _refresh_source, stop_on=(BandcampBotCheck,))
 
 
 @app.function(
@@ -416,10 +426,12 @@ def refresh_generated_cache() -> dict:
     from netnewswire_feed_booster.generated_adapters import BANDCAMP_ADAPTER, adapter_for_source
 
     sources = [s for s in _active_sources_for_route("generated") if adapter_for_source(s) is not BANDCAMP_ADAPTER]
-    return _refresh_due_sources(sources, _refresh_generated_source)
+    # Pruning covers every generated source, Bandcamp included. It runs here so
+    # it keeps running when the Bandcamp refresh is off.
+    return _refresh_due_sources(sources, _refresh_generated_source, prune_retired=True)
 
 
-def _refresh_due_sources(sources, refresh_source, prune_retired: bool = False) -> dict:
+def _refresh_due_sources(sources, refresh_source, prune_retired: bool = False, stop_on: tuple = ()) -> dict:
     from netnewswire_feed_booster.bridge_policy import due_sources
 
     refreshed = 0
@@ -449,6 +461,10 @@ def _refresh_due_sources(sources, refresh_source, prune_retired: bool = False) -
         # show a source that keeps failing while it serves an old copy.
         _record_refresh(source.id, now, outcome)
         attempted += 1
+        if isinstance(outcome, stop_on):
+            # A bot check answers every request from this network alike, so the
+            # rest of the batch would only send it more traffic.
+            break
         time.sleep(REFRESH_PAUSE_SECONDS)
 
     if attempted or pruned:

@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
+from datetime import timezone
 from math import ceil
 from typing import Callable, Iterable, Optional, TypeVar
+
+from .rss_safety import parse_internet_date
 
 
 T = TypeVar("T")
@@ -12,6 +16,7 @@ DEFAULT_REFRESH_SCHEDULE_HOURS = 1
 DEFAULT_MAX_REFRESH_SOURCES_PER_RUN = 20
 MAX_SAFE_REFRESH_SOURCES_PER_RUN = 25
 DEFAULT_MAX_RSS_ITEMS_PER_SOURCE = 50
+BANDCAMP_REFRESH_SETTING = "RSS_BRIDGE_BANDCAMP_REFRESH"
 
 
 class FeedWaitingForRefresh(Exception):
@@ -23,6 +28,41 @@ def require_cached_feed(rss: str | None, source_name: str) -> str:
     if rss is None:
         raise FeedWaitingForRefresh(f"{source_name} feed is waiting for its scheduled refresh")
     return rss
+
+
+def bandcamp_refresh_setting(value: Optional[str]) -> str:
+    """Read RSS_BRIDGE_BANDCAMP_REFRESH: "on" (the default) or "off"."""
+    setting = (value or "").strip().lower() or "on"
+    if setting not in {"on", "off"}:
+        raise ValueError(f"{BANDCAMP_REFRESH_SETTING} must be on or off")
+    return setting
+
+
+def served_copy(cached: Optional[str], seeded: Optional[str]) -> Optional[str]:
+    """Pick what a reader gets: the cached copy, unless the deploy shipped a newer build.
+
+    The cache normally wins, because the scheduler rewrites it after a deploy.
+    The seed wins only when both copies carry a lastBuildDate and the seed's is
+    later. With a route's refresh turned off, a local refresh plus a redeploy is
+    the only way its feeds move, and an older cache would otherwise hide it.
+    """
+    if cached is None or seeded is None:
+        return cached if cached is not None else seeded
+    cached_built = _last_build_timestamp(cached)
+    seeded_built = _last_build_timestamp(seeded)
+    if cached_built is not None and seeded_built is not None and seeded_built > cached_built:
+        return seeded
+    return cached
+
+
+def _last_build_timestamp(rss: str) -> Optional[float]:
+    try:
+        built = parse_internet_date(ET.fromstring(rss).findtext("channel/lastBuildDate") or "")
+    except (ET.ParseError, ValueError):
+        return None
+    if built.tzinfo is None:
+        built = built.replace(tzinfo=timezone.utc)
+    return built.timestamp()
 
 
 def due_sources(

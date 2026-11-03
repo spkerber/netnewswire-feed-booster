@@ -99,6 +99,35 @@ class SummaryTests(unittest.TestCase):
         self.assertIn("Nothing to serve; readers get 'waiting for its scheduled refresh' (1):", report)
         self.assertIn("  ... and 40 more", report)
         self.assertLess(report.index("failing-for-weeks\t40"), report.index("failing-recently-fine\t1"))
+        self.assertNotIn("refresh off", report)
+
+    def test_a_route_with_refresh_off_is_reported_apart_from_live_failures(self) -> None:
+        states = {
+            "bandcamp-blocked": RefreshState(last_attempt=NOW - 30 * DAY, last_success=NOW - 32 * DAY, last_error="BandcampBotCheck: Bandcamp served a bot check", consecutive_failures=3),
+            "nts-healthy": RefreshState(last_attempt=NOW - HOUR, last_success=NOW - HOUR),
+        }
+        cached = {"bandcamp-blocked": NOW - 32 * DAY, "nts-healthy": NOW - HOUR}
+        source_ids = ["bandcamp-blocked", "bandcamp-seed-only", "bandcamp-no-copy", "nts-healthy"]
+
+        health = summarize_bridge_health(
+            source_ids,
+            states,
+            cached,
+            {"bandcamp-seed-only"},
+            NOW,
+            interval_seconds=12 * HOUR,
+            refresh_off={"bandcamp-blocked", "bandcamp-seed-only", "bandcamp-no-copy"},
+        )
+        report = format_bridge_health(health)
+
+        self.assertEqual(health.refresh_off, ["bandcamp-blocked", "bandcamp-no-copy", "bandcamp-seed-only"])
+        self.assertEqual(health.healthy, ["nts-healthy"])
+        self.assertEqual((health.failing, health.stale, health.never_attempted), ([], [], []))
+        # What readers get still counts: one source has no copy at all.
+        self.assertEqual(health.seed_only, ["bandcamp-seed-only"])
+        self.assertEqual(health.nothing_to_serve, ["bandcamp-no-copy"])
+        self.assertTrue(health.has_problems)
+        self.assertIn("  refresh off            3  (serving the last cached or deploy-time copy)", report)
 
 
 if __name__ == "__main__":

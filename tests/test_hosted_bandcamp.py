@@ -3,6 +3,8 @@ import unittest
 import isolated_env  # Clears private profile settings; keep above package imports.
 from netnewswire_feed_booster.feed_store import Source
 from netnewswire_feed_booster.hosted_bandcamp import (
+    BandcampBotCheck,
+    bandcamp_items_for_source,
     hosted_generated_feed_url,
     render_bandcamp_source_rss,
     sources_with_hosted_generated_feeds,
@@ -12,6 +14,11 @@ from netnewswire_feed_booster.hosted_bandcamp import (
 BANDCAMP_ARTIST_MUSIC_HTML = '''
 <ol id="music-grid" data-client-items="[{&quot;art_id&quot;:1463768112,&quot;artist&quot;:&quot;Fixture Artist&quot;,&quot;band_id&quot;:1601512585,&quot;id&quot;:2261764695,&quot;page_url&quot;:&quot;/album/fixture-record&quot;,&quot;title&quot;:&quot;Fixture Record&quot;,&quot;type&quot;:&quot;album&quot;}]"></ol>
 '''
+# The shape of the page Bandcamp sends a blocked network, as HTTP 200.
+BANDCAMP_BOT_CHECK_HTML = """<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>Client Challenge</title></head>
+<body><noscript>JavaScript is disabled in your browser.</noscript></body></html>
+"""
 
 
 class HostedBandcampTests(unittest.TestCase):
@@ -84,6 +91,35 @@ class HostedBandcampTests(unittest.TestCase):
         self.assertEqual(fetched_urls, ["https://fixture-artist.bandcamp.com/music"])
         self.assertIn("<title>Bandcamp: Fixture Artist</title>", rss)
         self.assertIn("<title>Fixture Artist - Fixture Record</title>", rss)
+
+    def test_a_bot_check_page_is_named_rather_than_read_as_an_empty_page(self) -> None:
+        artist = Source(
+            id="bandcamp-fixture-artist",
+            title="Bandcamp: Fixture Artist",
+            feed_url="file:///tmp/bandcamp-fixture-artist.rss",
+            site_url="https://fixture-artist.bandcamp.com/",
+            kind="bandcamp",
+        )
+        fan = Source(
+            id="bandcamp-fan-fixture",
+            title="Bandcamp Fan: Fixture",
+            feed_url="file:///tmp/bandcamp-fan-fixture.rss",
+            site_url="https://bandcamp.com/fixture",
+            kind="bandcamp",
+        )
+        dated = []
+
+        for source in (artist, fan):
+            with self.subTest(source=source.id):
+                with self.assertRaisesRegex(BandcampBotCheck, f"bot check instead of {source.id}"):
+                    render_bandcamp_source_rss(source, fetcher=lambda _url: BANDCAMP_BOT_CHECK_HTML)
+        # It is caught before any follow-up request, such as the discography lookup.
+        with self.assertRaises(BandcampBotCheck):
+            bandcamp_items_for_source(artist, BANDCAMP_BOT_CHECK_HTML, post_band_details=lambda *args: dated.append(args))
+        self.assertEqual(dated, [])
+        # It is still a ValueError, so callers that skip a failed source keep doing so.
+        self.assertTrue(issubclass(BandcampBotCheck, ValueError))
+        self.assertTrue(bandcamp_items_for_source(artist, BANDCAMP_ARTIST_MUSIC_HTML))
 
 
 if __name__ == "__main__":

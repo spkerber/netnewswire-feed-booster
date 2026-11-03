@@ -71,12 +71,17 @@ This reads `/feeds/<token>/health` on the deployed bridge, which is behind the f
 | stale | No success within three refresh intervals |
 | seed copy only | No cached refresh yet; readers get the copy bundled at deploy |
 | nothing to serve | No cache and no seed; readers get "waiting for its scheduled refresh" |
+| refresh off | Shown only with `RSS_BRIDGE_BANDCAMP_REFRESH=off`: Bandcamp sources the bridge no longer refreshes, kept out of failing and stale |
 
 The route reads only the cache volume. State written before success tracking holds only the last attempt, so until every source has been refreshed once the report falls back to each cache file's age. That makes the first reports after this change overstate staleness, never understate it.
 
 ### Seeds Come From Your Checkout
 
-Deploys bundle `exports/generated` from the local checkout as seeds. A source the bridge has never refreshed serves that copy, which is only as fresh as your last local refresh. A source with no local file has nothing to serve until its first scheduled refresh. Two ways to keep seeds from going quietly stale, not yet implemented:
+Deploys bundle `exports/generated` from the local checkout as seeds. A source the bridge has never refreshed serves that copy, which is only as fresh as your last local refresh. A source with no local file has nothing to serve until its first scheduled refresh.
+
+A source with both copies serves the cached one, unless the seed's `lastBuildDate` is later. Then the seed wins until the next refresh rewrites the cache. That is what lets a local refresh plus a redeploy update feeds whose refresh is off. Only generated Bandcamp feeds carry a `lastBuildDate` today; for every other source the cache always wins.
+
+Two ways to keep seeds from going quietly stale, not yet implemented:
 
 - Refresh locally before deploying (`refresh-bandcamp-local-feeds`, `refresh-generated-local-feeds`), so seeds start current.
 - Stop bundling local files, and seed new sources from their first scheduled refresh instead. This trades a short "waiting for its scheduled refresh" window for never serving a months-old copy as if it were current.

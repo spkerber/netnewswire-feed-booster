@@ -1589,6 +1589,86 @@ class CliTests(unittest.TestCase):
 
         sleep_mock.assert_not_called()
 
+    def test_refresh_bandcamp_local_feeds_stops_at_a_bot_check(self) -> None:
+        bot_check_html = "<html><head><title>Client Challenge</title></head><body></body></html>"
+        with TemporaryDirectory() as tmp_dir:
+            data_path = Path(tmp_dir) / "sources.json"
+            out_dir = Path(tmp_dir) / "generated"
+            store = FeedStore(data_path)
+            for index in range(1, 4):
+                store.add_or_update(
+                    Source(
+                        id=f"bandcamp-fixture-{index}",
+                        title=f"Bandcamp: Fixture {index}",
+                        feed_url=f"file:///old/bandcamp-fixture-{index}.rss",
+                        site_url=f"https://fixture-{index}.bandcamp.com",
+                        kind="bandcamp",
+                        profiles=["test-user"],
+                        groups=["Bandcamp"],
+                    )
+                )
+            store.save()
+
+            with patch("netnewswire_feed_booster.cli.fetch_text", return_value=bot_check_html) as fetch_mock:
+                with patch("netnewswire_feed_booster.cli.time.sleep"):
+                    with redirect_stdout(io.StringIO()) as output:
+                        result = main(
+                            [
+                                "--data",
+                                str(data_path),
+                                "refresh-bandcamp-local-feeds",
+                                "--profile",
+                                "test-user",
+                                "--out-dir",
+                                str(out_dir),
+                            ]
+                        )
+
+            refreshed = FeedStore(data_path)
+            rendered = output.getvalue()
+
+        self.assertEqual(result, 1)
+        self.assertEqual(fetch_mock.call_count, 1)
+        self.assertIn("STOPPED\tbandcamp-fixture-1\tBandcamp served a bot check", rendered)
+        self.assertIn("Stopped early: Bandcamp is answering this network with a bot check.", rendered)
+        for index in range(1, 4):
+            self.assertEqual(refreshed.source_by_id(f"bandcamp-fixture-{index}").feed_url, f"file:///old/bandcamp-fixture-{index}.rss")
+
+    def test_refresh_plan_leaves_out_bandcamp_when_its_refresh_is_off(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            data_path = Path(tmp_dir) / "sources.json"
+            store = FeedStore(data_path)
+            # 300 Bandcamp sources exceed the default 240-per-12-hours capacity.
+            for index in range(300):
+                store.add_or_update(
+                    Source(
+                        id=f"bandcamp-fixture-{index}",
+                        title=f"Bandcamp: Fixture {index}",
+                        feed_url=f"file:///old/bandcamp-fixture-{index}.rss",
+                        site_url=f"https://fixture-{index}.bandcamp.com",
+                        kind="bandcamp",
+                        profiles=["test-user"],
+                    )
+                )
+            store.save()
+            argv = ["--data", str(data_path), "refresh-plan", "--profile", "test-user"]
+
+            with redirect_stdout(io.StringIO()) as on_output:
+                on_result = main(argv)
+            with patch.dict(os.environ, {"RSS_BRIDGE_BANDCAMP_REFRESH": "off"}):
+                with redirect_stdout(io.StringIO()) as off_output:
+                    off_result = main(argv)
+            with patch.dict(os.environ, {"RSS_BRIDGE_BANDCAMP_REFRESH": "paused"}):
+                with redirect_stderr(io.StringIO()) as bad_output:
+                    with self.assertRaises(SystemExit):
+                        main(argv)
+
+        self.assertEqual(on_result, 1)
+        self.assertIn("bandcamp: 300 sources; first pass 15h; capacity per target interval 240; exceeds capacity", on_output.getvalue())
+        self.assertEqual(off_result, 0)
+        self.assertIn("bandcamp: 300 sources; refresh off, serving the last cached or deploy-time copy", off_output.getvalue())
+        self.assertIn("RSS_BRIDGE_BANDCAMP_REFRESH must be on or off", bad_output.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

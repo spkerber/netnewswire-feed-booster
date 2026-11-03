@@ -87,6 +87,7 @@ class BridgeHealth:
     stale: List[Tuple[str, Optional[float]]] = field(default_factory=list)
     seed_only: List[str] = field(default_factory=list)
     nothing_to_serve: List[str] = field(default_factory=list)
+    refresh_off: List[str] = field(default_factory=list)
 
     @property
     def has_problems(self) -> bool:
@@ -101,14 +102,20 @@ def summarize_bridge_health(
     now: float,
     interval_seconds: float,
     stale_after_intervals: int = DEFAULT_STALE_AFTER_INTERVALS,
+    refresh_off: Iterable[str] = (),
 ) -> BridgeHealth:
     """Sort active generated sources by what a reader is actually getting.
 
     `cached` maps source ID to the cache file's modification time, which stands
     in for a last success in state written before success tracking existed.
     A 304 leaves that file untouched, so it is a lower bound, never too recent.
+
+    Sources in `refresh_off` belong to a route whose refresh is switched off.
+    They still count toward nothing to serve and seed copy only, but not toward
+    failing or stale: their last refresh outcome is history, not a live problem.
     """
     ids = sorted(set(source_ids))
+    not_refreshed = set(refresh_off)
     stale_after = interval_seconds * stale_after_intervals
     health = BridgeHealth(checked_at=now, interval_seconds=interval_seconds, stale_after_seconds=stale_after, total=len(ids))
     for source_id in ids:
@@ -117,6 +124,9 @@ def summarize_bridge_health(
             health.nothing_to_serve.append(source_id)
         elif source_id not in cached:
             health.seed_only.append(source_id)
+        if source_id in not_refreshed:
+            health.refresh_off.append(source_id)
+            continue
         if state.last_attempt is None:
             health.never_attempted.append(source_id)
             continue
@@ -148,6 +158,8 @@ def format_bridge_health(health: BridgeHealth, list_limit: int = DEFAULT_LIST_LI
         f"  seed copy only    {len(health.seed_only):6d}",
         f"  nothing to serve  {len(health.nothing_to_serve):6d}",
     ]
+    if health.refresh_off:
+        lines.append(f"  refresh off       {len(health.refresh_off):6d}  (serving the last cached or deploy-time copy)")
 
     def section(title: str, rows: List[str]) -> None:
         if not rows:

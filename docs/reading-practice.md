@@ -68,7 +68,7 @@ For a wide collection, keep the hourly scheduler and lengthen the refresh window
 
 ## Storage And Reader Context
 
-The Modal Volume stores only the latest generated RSS, HTTP validators, and one last-attempt timestamp per active generated source. It does not keep an article archive, request log, or per-item consumption history. Removed sources are pruned from the cache, validator, and scheduler-state directories during the Bandcamp refresh job.
+The Modal Volume stores only the latest generated RSS, HTTP validators, and one last-attempt timestamp per active generated source. It does not keep an article archive, request log, or per-item consumption history. Removed sources, Bandcamp included, are pruned from the cache, validator, and scheduler-state directories during the generated-feed refresh job, so pruning continues when the Bandcamp refresh is off.
 
 Generated feeds retain 50 current items by default. This keeps RSS payloads small and avoids re-exporting an artist's entire catalog on every refresh. Increase `RSS_MAX_ITEMS_PER_SOURCE` only if a source genuinely needs a deeper current window.
 
@@ -79,3 +79,20 @@ The reader, not the bridge, owns read/unread state and item history. Stable RSS 
 Reader requests serve only a cached or seeded feed and never force an upstream fetch. If neither exists, the bridge returns a temporary `503` until the scheduled job succeeds. Failed refreshes retain the last good RSS and wait until the next eligible interval instead of retrying in a tight loop.
 
 This is intentional: slower recovery is preferable to repeatedly hitting a source during an outage or anti-abuse response. If a source is time-sensitive, use its native feed when available or configure a shorter interval after confirming the source can tolerate it.
+
+### When Bandcamp Blocks The Host
+
+Bandcamp can answer a whole network with a bot check: a "Client Challenge" page, sent as HTTP 200, in place of every artist page and API response. Since about October 2026 it has answered every request from Modal this way, while the same requests from a home connection still get real pages, so assume other cloud hosts get it too. The bridge recognizes the page and reports it as `BandcampBotCheck` rather than as a page with no releases. A refresh run stops at the first one, and so does `refresh-bandcamp-local-feeds`, which then exits with status 1, because every further request would get the same answer.
+
+Never try to get past the check. Turn the bridge's Bandcamp refresh off instead, in ignored `data/private.env`, and redeploy:
+
+```dotenv
+RSS_BRIDGE_BANDCAMP_REFRESH=off
+```
+
+With the refresh off, the bridge sends Bandcamp nothing. Bandcamp feeds serve their last cached or deploy-time copy, `bridge-health` lists them as "refresh off" rather than failing or stale, and `refresh-plan` leaves them out of its capacity check. To catch them up now and then, refresh from a network Bandcamp still answers, then redeploy: a seed built after the cached copy is served in its place (see [Seeds Come From Your Checkout](hosting.md#seeds-come-from-your-checkout)).
+
+```bash
+python3 -m netnewswire_feed_booster refresh-bandcamp-local-feeds --profile "$RSS_PROFILE"
+./scripts/netnewswire_workflow.sh deploy-modal
+```
