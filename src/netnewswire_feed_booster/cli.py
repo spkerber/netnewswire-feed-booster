@@ -912,6 +912,9 @@ def _apply_default_group(args: argparse.Namespace, argv: list[str]) -> None:
 
     if not hasattr(args, "group") or _option_was_supplied(argv, "--group"):
         return
+    if getattr(args, "band_ids_only", False):
+        # Nothing is filed: only band ids are recorded on existing sources.
+        return
 
     key = ADAPTER_KEY_BY_COMMAND.get(args.command) or ADAPTER_KEY_BY_KIND.get(getattr(args, "kind", ""))
     if key is None:

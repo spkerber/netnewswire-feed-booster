@@ -1770,7 +1770,7 @@ class CliTests(unittest.TestCase):
             data_path = self._custom_domain_bandcamp_store(tmp_dir, band_id=None)
             before = FeedStore(data_path).source_by_id("bandcamp-fixture-storefront")
             with patch("netnewswire_feed_booster.cli.import_bandcamp_following", return_value=followed) as importer:
-                with redirect_stdout(io.StringIO()) as output:
+                with redirect_stdout(io.StringIO()) as output, redirect_stderr(io.StringIO()) as errors:
                     result = main(
                         [
                             "--data",
@@ -1789,6 +1789,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertFalse(importer.call_args.kwargs["include_fans"])
         self.assertIn("Recorded Bandcamp band ids on 1 sources already in the registry. Nothing was added.", output.getvalue())
+        self.assertNotIn("No --group given", output.getvalue() + errors.getvalue())
         self.assertEqual(after.bandcamp_band_id, 4242)
         self.assertEqual(source_ids, ["bandcamp-fixture-storefront"])
         for field_name in ("title", "feed_url", "site_url", "groups", "notes", "status", "source"):
