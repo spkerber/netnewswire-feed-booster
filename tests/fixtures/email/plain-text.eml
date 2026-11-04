@@ -1,0 +1,17 @@
+Authentication-Results: mx.cloudflare.net; dkim=pass header.d=letters.example.net header.s=k1; spf=softfail smtp.mailfrom=letters.example.net; dmarc=none
+From: "Letters" <post@letters.example.net>
+To: inbox+letters-fedcba9876543210@feeds.example.com
+Subject: =?utf-8?q?Caf=C3=A9_letter_no=2E_7?=
+Date: Sun, 01 Nov 2026 09:30:00 -0800
+Message-ID: <letter-7@letters.example.net>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+Dear reader,
+
+This week's caf=C3=A9 letter is online at https://letters.example.net/7?mc_c=
+id=3Dabc&id=3D7
+
+Sent to inbox+letters-fedcba9876543210@feeds.example.com.
+Unsubscribe here: https://letters.example.net/unsubscribe?u=3D1

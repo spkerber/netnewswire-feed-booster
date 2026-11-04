@@ -2,9 +2,10 @@ import unittest
 from unittest.mock import patch
 
 import isolated_env  # Clears private profile settings; keep above package imports.
-from netnewswire_feed_booster.feed_store import Source
+from netnewswire_feed_booster.feed_store import EmailIntake, Source
 from netnewswire_feed_booster.generated_adapters import (
     BANDCAMP_ADAPTER,
+    EMAIL_ADAPTER,
     HYDEFM_ADAPTER,
     MIXCLOUD_ADAPTER,
     NTS_ADAPTER,
@@ -208,6 +209,54 @@ class GeneratedAdapterTests(unittest.TestCase):
             configured_bandcamp_redirect_hosts("127.0.0.1")
         with self.assertRaisesRegex(ValueError, "Invalid"):
             configured_bandcamp_redirect_hosts("*.example.com")
+
+
+class EmailAdapterTests(unittest.TestCase):
+    def email_source(self, **overrides) -> Source:
+        values = dict(
+            id="email-weekly-notes",
+            title="Weekly Notes",
+            feed_url="file:///tmp/email-weekly-notes.rss",
+            kind="newsletter",
+            source="email-inbound",
+            email=EmailIntake("inbox+weekly-notes-0123456789abcdef@feeds.example.com", ["news.example.net"]),
+        )
+        values.update(overrides)
+        return Source(**values)
+
+    def test_an_email_source_is_served_on_the_generated_route_without_fetching(self) -> None:
+        source = self.email_source()
+
+        self.assertIs(adapter_for_source(source), EMAIL_ADAPTER)
+        self.assertEqual(EMAIL_ADAPTER.hosted_route, "generated")
+        self.assertFalse(EMAIL_ADAPTER.fetches_upstream)
+        EMAIL_ADAPTER.validate(source)
+        with self.assertRaises(ValueError):
+            EMAIL_ADAPTER.upstream_url(source)
+        with self.assertRaises(ValueError):
+            EMAIL_ADAPTER.render(source, "")
+        self.assertEqual(EMAIL_ADAPTER.allowed_hosts_for(source), frozenset())
+
+    def test_every_other_adapter_still_fetches_upstream(self) -> None:
+        for adapter in (BANDCAMP_ADAPTER, NTS_ADAPTER, WEBPAGE_ADAPTER, MIXCLOUD_ADAPTER):
+            with self.subTest(adapter=adapter.name):
+                self.assertTrue(adapter.fetches_upstream)
+
+    def test_an_email_source_with_unusable_settings_matches_no_adapter(self) -> None:
+        for overrides in (
+            {"email": None},
+            {"email": EmailIntake("not-an-address", ["news.example.net"])},
+            {"email": EmailIntake("inbox+x-1@feeds.example.com", [])},
+            {"source": "manual"},
+        ):
+            with self.subTest(overrides=overrides):
+                self.assertIsNone(adapter_for_source(self.email_source(**overrides)))
+
+    def test_hosted_export_rewrites_an_email_source_like_any_generated_feed(self) -> None:
+        rewritten = sources_with_hosted_generated_feeds([self.email_source()], "https://bridge.example.com", token="t")
+
+        self.assertEqual(rewritten[0].feed_url, "https://bridge.example.com/feeds/t/generated/email-weekly-notes.rss")
+        self.assertEqual(rewritten[0].email, self.email_source().email)
 
 
 if __name__ == "__main__":

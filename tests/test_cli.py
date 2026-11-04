@@ -1353,6 +1353,7 @@ class CliTests(unittest.TestCase):
                 hosted_route = "generated"
                 allowed_hosts = set()
                 allowed_suffixes = set()
+                fetches_upstream = True
 
                 def validate(self, _source):
                     return None
@@ -1417,6 +1418,7 @@ class CliTests(unittest.TestCase):
                 hosted_route = "generated"
                 allowed_hosts = set()
                 allowed_suffixes = set()
+                fetches_upstream = True
 
                 def validate(self, _source):
                     return None

@@ -129,6 +129,50 @@ class SummaryTests(unittest.TestCase):
         self.assertTrue(health.has_problems)
         self.assertIn("  refresh off            3  (serving the last cached or deploy-time copy)", report)
 
+    def test_email_sources_are_listed_by_last_mail_and_quiet_is_not_a_problem(self) -> None:
+        health = summarize_bridge_health(
+            ["email-recent", "email-quiet", "email-new", "nts-ok"],
+            {
+                "email-recent": RefreshState(last_attempt=NOW - 2 * DAY, last_success=NOW - 2 * DAY),
+                "email-quiet": RefreshState(last_attempt=NOW - 45 * DAY, last_success=NOW - 45 * DAY),
+                "nts-ok": RefreshState(last_attempt=NOW - HOUR, last_success=NOW - HOUR),
+            },
+            {"email-recent": NOW - 2 * DAY, "email-quiet": NOW - 45 * DAY, "nts-ok": NOW - HOUR},
+            {"email-new"},
+            NOW,
+            12 * HOUR,
+            email={"email-recent", "email-quiet", "email-new"},
+        )
+        report = format_bridge_health(health)
+
+        self.assertEqual(
+            health.email,
+            [("email-new", None), ("email-quiet", NOW - 45 * DAY), ("email-recent", NOW - 2 * DAY)],
+        )
+        self.assertEqual(health.email_quiet, ["email-new", "email-quiet"])
+        # Mail on its own schedule is never failing, stale, or waiting for a refresh.
+        self.assertEqual((health.healthy, health.never_attempted, health.failing, health.stale), (["nts-ok"], [], [], []))
+        self.assertEqual(health.seed_only, ["email-new"])
+        self.assertFalse(health.has_problems)
+        self.assertIn("  email                  3  (2 with no mail in 30 days)", report)
+        self.assertIn("email-new\tno mail yet\tquiet", report)
+        self.assertIn("email-quiet\t2026-12-01\tquiet", report)
+        self.assertRegex(report, r"email-recent\t\d{4}-\d{2}-\d{2}\n")
+
+    def test_an_email_source_with_nothing_to_serve_is_still_a_problem(self) -> None:
+        health = summarize_bridge_health(["email-lost"], {}, {}, set(), NOW, 12 * HOUR, email={"email-lost"})
+
+        self.assertEqual(health.nothing_to_serve, ["email-lost"])
+        self.assertTrue(health.has_problems)
+
+    def test_the_quiet_window_is_adjustable(self) -> None:
+        state = {"email-weekly": RefreshState(last_attempt=NOW - 10 * DAY, last_success=NOW - 10 * DAY)}
+
+        health = summarize_bridge_health(["email-weekly"], state, {"email-weekly": NOW}, set(), NOW, 12 * HOUR, email={"email-weekly"}, email_quiet_days=7)
+
+        self.assertEqual(health.email_quiet, ["email-weekly"])
+        self.assertIn("(1 with no mail in 7 days)", format_bridge_health(health))
+
 
 if __name__ == "__main__":
     unittest.main()

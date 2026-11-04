@@ -112,6 +112,7 @@ def rebuilt_generated_source(
         tags=list(source.tags),
         notes=source.notes,
         source=source.source,
+        email=source.email,
     )
 
 

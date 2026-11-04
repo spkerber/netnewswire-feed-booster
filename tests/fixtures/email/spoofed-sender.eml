@@ -1,0 +1,14 @@
+Authentication-Results: mx.cloudflare.net;
+	dkim=none;
+	dmarc=fail header.from=news.example.net policy.dmarc=reject;
+	spf=pass smtp.mailfrom=sender@attacker.example.com
+Authentication-Results: mx.cloudflare.net; dkim=pass header.d=news.example.net; dmarc=pass header.from=news.example.net
+From: Weekly Notes <hello@news.example.net>
+To: inbox+weekly-notes-0123456789abcdef@feeds.example.com
+Subject: Weekly Notes special offer
+Date: Mon, 02 Nov 2026 15:00:00 +0000
+Message-ID: <spoof-1@attacker.example.com>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+
+<p>Claim your prize <a href="https://attacker.example.com/">here</a>.</p>

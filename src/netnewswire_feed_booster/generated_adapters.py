@@ -50,12 +50,16 @@ class GeneratedAdapter:
     legacy_source_labels: frozenset[str] = frozenset()
     source_allowed_hosts: Optional[SourceHostPolicy] = None
     source_allowed_suffixes: Optional[SourceHostPolicy] = None
+    # False for sources whose content is pushed to the bridge rather than
+    # fetched (email). Scheduled and local refreshes skip them.
+    fetches_upstream: bool = True
 
     def validate(self, source: Source) -> None:
         if not self.matches(source):
             raise ValueError(f"{source.id} is not a valid {self.name} source")
-        # Calling upstream_url performs adapter-specific URL-shape validation.
-        self.upstream_url(source)
+        if self.fetches_upstream:
+            # Calling upstream_url performs adapter-specific URL-shape validation.
+            self.upstream_url(source)
 
     @property
     def source_labels(self) -> frozenset[str]:
@@ -258,6 +262,20 @@ def _render_mixcloud(source: Source, content: str) -> str:
     return render_mixcloud_profile_rss(source.site_url, fetcher=lambda _: json.loads(content))
 
 
+def _email_matches(source: Source) -> bool:
+    from .email_feeds import is_email_source
+
+    return is_email_source(source)
+
+
+def _email_upstream_url(source: Source) -> str:
+    raise ValueError(f"Email sources have no upstream to fetch: {source.id}")
+
+
+def _render_email(source: Source, content: str) -> str:
+    raise ValueError(f"Email sources are rendered from received mail, not fetched content: {source.id}")
+
+
 BANDCAMP_ADAPTER = GeneratedAdapter(
     name="Bandcamp",
     source_label="bandcamp-local-generated",
@@ -325,7 +343,21 @@ MIXCLOUD_ADAPTER = GeneratedAdapter(
     render=_render_mixcloud,
 )
 
-GENERATED_ADAPTERS = (BANDCAMP_ADAPTER, NTS_ADAPTER, WEBPAGE_ADAPTER, MIXCLOUD_ADAPTER)
+EMAIL_ADAPTER = GeneratedAdapter(
+    name="email",
+    source_label="email-inbound",
+    # Served like every other generated feed, but built from mail the bridge
+    # receives at /inbound/email (see email_feeds.py), never from a fetch.
+    hosted_route="generated",
+    allowed_hosts=frozenset(),
+    allowed_suffixes=frozenset(),
+    matches=_email_matches,
+    upstream_url=_email_upstream_url,
+    render=_render_email,
+    fetches_upstream=False,
+)
+
+GENERATED_ADAPTERS = (BANDCAMP_ADAPTER, NTS_ADAPTER, WEBPAGE_ADAPTER, MIXCLOUD_ADAPTER, EMAIL_ADAPTER)
 GENERATED_SOURCE_LABELS = frozenset(
     source_label
     for adapter in GENERATED_ADAPTERS

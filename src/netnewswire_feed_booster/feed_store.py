@@ -77,6 +77,38 @@ def normalize_url(value: str) -> str:
 
 
 @dataclass
+class EmailIntake:
+    """Where an email source's mail arrives, and who may send it.
+
+    The address is the source's own subaddress on the bridge's mail domain. It
+    is private: it lives only in the gitignored profile registry and is never
+    exported to OPML or served. Only mail whose From domain, authenticated by
+    the mail host, is one of `sender_domains` (or a subdomain) becomes an item.
+    Remote images are kept only from `image_hosts`, because loading them tells
+    the sender when the item was read.
+    """
+
+    address: str
+    sender_domains: List[str]
+    image_hosts: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "address": self.address,
+            "sender_domains": sorted(set(self.sender_domains)),
+            "image_hosts": sorted(set(self.image_hosts)),
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "EmailIntake":
+        return cls(
+            address=str(data.get("address", "")),
+            sender_domains=list(data.get("sender_domains", [])),
+            image_hosts=list(data.get("image_hosts", [])),
+        )
+
+
+@dataclass
 class Source:
     id: str
     title: str
@@ -91,10 +123,12 @@ class Source:
     added_at: str = field(default_factory=today_iso)
     last_reviewed_at: Optional[str] = None
     source: str = "manual"
+    # Email sources only. Every other source leaves it out of its record.
+    email: Optional[EmailIntake] = None
 
     def to_dict(self) -> Dict[str, Any]:
         normalized_groups = normalize_groups_for_source(self)
-        return {
+        record = {
             "id": self.id,
             "title": self.title,
             "feed_url": self.feed_url,
@@ -109,9 +143,13 @@ class Source:
             "last_reviewed_at": self.last_reviewed_at,
             "source": self.source,
         }
+        if self.email is not None:
+            record["email"] = self.email.to_dict()
+        return record
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Source":
+        email = data.get("email")
         return cls(
             id=data["id"],
             title=data["title"],
@@ -126,6 +164,7 @@ class Source:
             added_at=data.get("added_at", today_iso()),
             last_reviewed_at=data.get("last_reviewed_at"),
             source=data.get("source", "manual"),
+            email=EmailIntake.from_dict(email) if isinstance(email, dict) else None,
         )
 
 
@@ -230,6 +269,7 @@ class FeedStore:
             existing.tags = sorted(set(existing.tags + source.tags))
             existing.notes = source.notes or existing.notes
             existing.source = existing.source if existing.source != "manual" else source.source
+            existing.email = source.email or existing.email
             changed_id = existing.id
         else:
             existing_ids = {item.id for item in sources}
@@ -273,6 +313,7 @@ class FeedStore:
                 existing.tags = sorted(set(existing.tags + source.tags))
                 existing.notes = source.notes or existing.notes
                 existing.source = existing.source if existing.source != "manual" else source.source
+                existing.email = source.email or existing.email
                 by_feed_url[existing.feed_url] = existing
                 if existing.kind in ACCOUNT_IDENTITY_KINDS:
                     updated_account_key = (existing.kind, canonical_url(existing.site_url))
