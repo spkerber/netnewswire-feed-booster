@@ -84,6 +84,23 @@ class BandcampFollowingTests(unittest.TestCase):
         assert source is not None
         self.assertEqual(source.site_url, "https://label.example")
 
+    def test_bandcamp_following_band_source_keeps_the_band_id(self) -> None:
+        item = {"band_id": 2702912497, "name": "Custom Label", "url_hints": {"custom_domain": "label.example"}}
+
+        source = bandcamp_following_band_source(item, profile="test-user", group="Bandcamp", out_dir=Path("exports/generated"))
+
+        assert source is not None
+        self.assertEqual(source.bandcamp_band_id, 2702912497)
+
+    def test_bandcamp_following_band_source_drops_a_malformed_band_id(self) -> None:
+        for band_id in ("12/34", -5, 0, True, None):
+            item = {"band_id": band_id, "name": "Custom Label", "url_hints": {"custom_domain": "label.example"}}
+
+            source = bandcamp_following_band_source(item, profile="test-user", group="Bandcamp", out_dir=Path("exports/generated"))
+
+            assert source is not None
+            self.assertIsNone(source.bandcamp_band_id, band_id)
+
     def test_bandcamp_following_band_source_returns_none_without_a_resolvable_url(self) -> None:
         item = {"band_id": 1, "name": "No URL", "url_hints": {}}
 

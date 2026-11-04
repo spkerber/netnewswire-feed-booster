@@ -1,22 +1,28 @@
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import replace
 from datetime import timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Callable, Iterable, List, Optional, Set
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 
 from .bandcamp import (
+    BANDCAMP_API_HOSTS,
+    BANDCAMP_BAND_DETAILS_API_URL,
+    BANDCAMP_TRALBUM_DETAILS_API_URL,
     PostBandDetails,
     add_bandcamp_release_dates,
+    bandcamp_discography_items,
+    bandcamp_release_urls_by_artwork,
     fetch_bandcamp_collection_items,
     parse_bandcamp_artist_music_html,
     render_bandcamp_collection_rss,
 )
 from .feed_store import Source
-from .http_client import fetch_text
+from .http_client import fetch_text, fetch_text_post
 from .generated_adapters import hosted_route_for_source
 
 
@@ -107,6 +113,69 @@ def bandcamp_items_for_source(
     if max_items is not None and fan_limit is not None:
         fan_limit = min(fan_limit, max_items)
     return fetch_bandcamp_collection_items(html, max_items=fan_limit)
+
+
+def is_bandcamp_custom_domain_artist(source: Source) -> bool:
+    """An artist or label storefront on its own domain rather than bandcamp.com."""
+    hostname = (urlparse(source.site_url).hostname or "").lower().rstrip(".")
+    return is_bandcamp_artist_source(source) and not (hostname == "bandcamp.com" or hostname.endswith(".bandcamp.com"))
+
+
+def uses_bandcamp_discography(source: Source) -> bool:
+    """Whether a refresh reads this source's discography instead of its /music page.
+
+    Some custom-domain storefronts answer this tool's requests with a redirect
+    loop: the custom domain sends it to the artist's bandcamp.com address,
+    which sends it straight back, though a browser gets the page. The
+    discography API on bandcamp.com answers the same requests, so a
+    custom-domain artist whose band id is known never requests its storefront.
+    """
+    return is_bandcamp_custom_domain_artist(source) and source.bandcamp_band_id is not None
+
+
+def fetch_bandcamp_discography(band_id: int) -> dict:
+    text = fetch_text_post(BANDCAMP_BAND_DETAILS_API_URL, {"band_id": band_id}, allowed_hosts=BANDCAMP_API_HOSTS)
+    return _bandcamp_api_json(text, f"the discography of band {band_id}")
+
+
+def fetch_bandcamp_release_url(band_id: int, release_key: str) -> str:
+    """The page URL of one release, from Bandcamp's tralbum_details API."""
+    kind, _, item_id = release_key.partition("-")
+    query = urlencode({"band_id": band_id, "tralbum_id": item_id, "tralbum_type": "a" if kind == "album" else "t"})
+    text = fetch_text(f"{BANDCAMP_TRALBUM_DETAILS_API_URL}?{query}", allowed_hosts=BANDCAMP_API_HOSTS)
+    payload = _bandcamp_api_json(text, f"release {release_key} of band {band_id}")
+    return str(payload.get("bandcamp_url") or "") if isinstance(payload, dict) else ""
+
+
+def _bandcamp_api_json(text: str, what: str) -> object:
+    if is_bandcamp_bot_check(text):
+        raise BandcampBotCheck(f"Bandcamp served a bot check instead of {what}")
+    return json.loads(text)
+
+
+def bandcamp_discography_items_for_source(
+    source: Source,
+    previous_feed: str = "",
+    max_items: Optional[int] = 50,
+    fetch_discography: Callable[[int], dict] = fetch_bandcamp_discography,
+    fetch_release_url: Callable[[int, str], str] = fetch_bandcamp_release_url,
+) -> list:
+    """A custom-domain artist's releases, read from bandcamp.com's APIs only.
+
+    One discography request per artist, plus one lookup for each release the
+    previous feed hasn't linked yet (a few at most per refresh), so releases
+    already in the feed keep their links and aren't shown again as new.
+    """
+    band_id = source.bandcamp_band_id
+    if band_id is None:
+        raise ValueError(f"{source.id} has no Bandcamp band id")
+    return bandcamp_discography_items(
+        fetch_discography(band_id),
+        source.site_url,
+        known_urls=bandcamp_release_urls_by_artwork(previous_feed) if previous_feed else {},
+        lookup_release_url=lambda release_key: fetch_release_url(band_id, release_key),
+        max_items=max_items,
+    )
 
 
 def render_bandcamp_source_rss(

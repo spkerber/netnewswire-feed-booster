@@ -72,10 +72,14 @@ from .bridge_policy import (
 )
 from .hosted_bandcamp import (
     BandcampBotCheck,
+    bandcamp_discography_items_for_source,
     bandcamp_fetch_url,
     bandcamp_items_for_source,
+    fetch_bandcamp_release_url,
     hosted_status_feed_url,
+    is_bandcamp_custom_domain_artist,
     sources_with_hosted_generated_feeds,
+    uses_bandcamp_discography,
 )
 from .bridge_health import STATUS_FEED_TITLE
 from .hosted_bandcamp import render_bandcamp_source_rss
@@ -400,6 +404,11 @@ def build_parser() -> argparse.ArgumentParser:
     bandcamp_following_parser.add_argument("--profile", default=DEFAULT_PROFILE)
     bandcamp_following_parser.add_argument("--group", default="")
     bandcamp_following_parser.add_argument("--out-dir", type=Path, default=Path("exports/generated"))
+    bandcamp_following_parser.add_argument(
+        "--band-ids-only",
+        action="store_true",
+        help="Only record Bandcamp band ids on artists and labels already in the registry; add and change nothing else",
+    )
 
     bandcamp_source_parser = subparsers.add_parser("subscribe-bandcamp-source", help="Add or reactivate a Bandcamp artist/label or fan source and generate its local RSS")
     bandcamp_source_parser.add_argument("url")
@@ -902,6 +911,9 @@ def _apply_default_group(args: argparse.Namespace, argv: list[str]) -> None:
     """
 
     if not hasattr(args, "group") or _option_was_supplied(argv, "--group"):
+        return
+    if getattr(args, "band_ids_only", False):
+        # Nothing is filed: only band ids are recorded on existing sources.
         return
 
     key = ADAPTER_KEY_BY_COMMAND.get(args.command) or ADAPTER_KEY_BY_KIND.get(getattr(args, "kind", ""))
@@ -1410,38 +1422,57 @@ def main(argv: Optional[list[str]] = None) -> int:
         ]
         bandcamp_sources.sort(key=lambda indexed_source: (indexed_source[1].id not in full_fan_source_ids, indexed_source[0]))
 
+        def paced_release_url(band_id: int, release_key: str) -> str:
+            if args.pause_seconds > 0:
+                time.sleep(args.pause_seconds)
+            return fetch_bandcamp_release_url(band_id, release_key)
+
         processed = 0
         bot_checked = False
+        failed_without_band_id = 0
         for _, source in bandcamp_sources:
             if source.source == "bandcamp-generated-music-feed":
                 continue
 
             try:
                 try:
-                    html = fetch_text(
-                        bandcamp_fetch_url(source),
-                        allowed_hosts=BANDCAMP_ADAPTER.allowed_hosts_for(source),
-                        allowed_suffixes=BANDCAMP_ADAPTER.allowed_suffixes_for(source),
-                    )
-                    items = bandcamp_items_for_source(
-                        source,
-                        html,
-                        fan_max_items=args.fan_max_items,
-                        full_fan_source_ids=full_fan_source_ids,
-                        max_items=args.max_items,
-                        post_band_details=post_bandcamp_band_details,
-                    )
+                    out_path = args.out_dir / f"{source.id}.rss"
+                    from_discography = uses_bandcamp_discography(source)
+                    if from_discography:
+                        items = bandcamp_discography_items_for_source(
+                            source,
+                            previous_feed=out_path.read_text(encoding="utf-8") if out_path.exists() else "",
+                            max_items=args.max_items,
+                            fetch_release_url=paced_release_url,
+                        )
+                    else:
+                        html = fetch_text(
+                            bandcamp_fetch_url(source),
+                            allowed_hosts=BANDCAMP_ADAPTER.allowed_hosts_for(source),
+                            allowed_suffixes=BANDCAMP_ADAPTER.allowed_suffixes_for(source),
+                        )
+                        items = bandcamp_items_for_source(
+                            source,
+                            html,
+                            fan_max_items=args.fan_max_items,
+                            full_fan_source_ids=full_fan_source_ids,
+                            max_items=args.max_items,
+                            post_band_details=post_bandcamp_band_details,
+                        )
                     if not items:
                         failed += 1
                         detail = source.site_url if args.show_sensitive else "[details redacted; use --show-sensitive]"
                         print(f"FAILED\t{source.id}\tNo items found\t{detail}")
                         continue
 
-                    out_path = args.out_dir / f"{source.id}.rss"
                     write_bandcamp_collection_rss(out_path, profile_url=source.site_url, title=source.title, items=items)
                     source.feed_url = out_path.resolve().as_uri()
                     source.source = "bandcamp-local-generated"
-                    source.notes = "Generated local RSS feed from the saved Bandcamp source page because OpenRSS did not mirror this Bandcamp feed reliably."
+                    source.notes = (
+                        "Generated local RSS feed from this custom-domain storefront's Bandcamp discography, because its own pages can redirect in a loop."
+                        if from_discography
+                        else "Generated local RSS feed from the saved Bandcamp source page because OpenRSS did not mirror this Bandcamp feed reliably."
+                    )
                     updated += 1
                     print(f"UPDATED\t{source.id}\t{len(items)} items")
                 except BandcampBotCheck:
@@ -1452,6 +1483,8 @@ def main(argv: Optional[list[str]] = None) -> int:
                     break
                 except Exception as error:
                     failed += 1
+                    if is_bandcamp_custom_domain_artist(source) and source.bandcamp_band_id is None:
+                        failed_without_band_id += 1
                     detail = (
                         f"{type(error).__name__}: {error}\t{source.site_url}"
                         if args.show_sensitive
@@ -1471,6 +1504,12 @@ def main(argv: Optional[list[str]] = None) -> int:
         store.save()
         print(f"Updated local Bandcamp feeds: {updated}")
         print(f"Failed local Bandcamp feeds: {failed}")
+        if failed_without_band_id:
+            print(
+                f"{failed_without_band_id} of them are custom-domain storefronts with no Bandcamp band id, "
+                "so they were read from their own pages, which can redirect in a loop. To read them from "
+                "bandcamp.com instead, record their ids with: import-bandcamp-following <your fan page URL> --band-ids-only"
+            )
         if bot_checked:
             print("Stopped early: Bandcamp is answering this network with a bot check. Sources not reached keep their current feeds.")
             return 1
@@ -1527,6 +1566,16 @@ def main(argv: Optional[list[str]] = None) -> int:
         store.save()
         print(f"Updated local generated feeds: {updated}")
         print(f"Failed local generated feeds: {failed}")
+        return 0
+
+    if args.command == "import-bandcamp-following" and args.band_ids_only:
+        sources = import_bandcamp_following(
+            args.url, profile=args.profile, group=args.group, out_dir=args.out_dir, include_fans=False
+        )
+        recorded = store.record_bandcamp_band_ids(sources)
+        if recorded:
+            store.save()
+        print(f"Recorded Bandcamp band ids on {recorded} sources already in the registry. Nothing was added.")
         return 0
 
     if args.command == "import-bandcamp-following":

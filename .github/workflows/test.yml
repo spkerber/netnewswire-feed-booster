@@ -16,7 +16,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          # The oldest Python this package supports (requires-python >= 3.9).
+          # setup-python has no 3.9 build for Ubuntu 26.04, which ubuntu-latest
+          # became, so this leg stays on 24.04.
+          - os: ubuntu-24.04
             python-version: "3.9"
           - os: ubuntu-latest
             python-version: "3.13"
