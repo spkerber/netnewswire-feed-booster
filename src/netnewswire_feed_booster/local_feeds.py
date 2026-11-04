@@ -26,7 +26,9 @@ WORKFLOW = "./scripts/netnewswire_workflow.sh"
 class LocalFeedGroup:
     name: str
     total: int = 0
-    newest: Optional[float] = None
+    # When most of the group was last rebuilt (the median), so one source
+    # added since does not pass for a full refresh.
+    last_refresh: Optional[float] = None
     stale: List[Tuple[str, float]] = field(default_factory=list)
     missing: List[str] = field(default_factory=list)
 
@@ -34,6 +36,7 @@ class LocalFeedGroup:
 def local_feed_group(name: str, source_ids: Iterable[str], out_dir: Path, now: float, stale_days: float) -> LocalFeedGroup:
     group = LocalFeedGroup(name)
     cutoff = now - stale_days * 24 * 60 * 60
+    build_times = []
     for source_id in sorted(source_ids):
         group.total += 1
         try:
@@ -41,9 +44,11 @@ def local_feed_group(name: str, source_ids: Iterable[str], out_dir: Path, now: f
         except FileNotFoundError:
             group.missing.append(source_id)
             continue
-        group.newest = built if group.newest is None else max(group.newest, built)
+        build_times.append(built)
         if built < cutoff:
             group.stale.append((source_id, built))
+    if build_times:
+        group.last_refresh = sorted(build_times)[len(build_times) // 2]
     return group
 
 
@@ -62,9 +67,9 @@ def format_local_feed_status(
 
     lines = [f"Generated feeds on this Mac for profile {profile} ({out_dir})"]
     for group in groups:
-        newest = f"newest rebuilt {when(group.newest)}" if group.newest is not None else "none built yet"
+        refreshed = f"last refreshed {when(group.last_refresh)}" if group.last_refresh is not None else "none built yet"
         lines.append(
-            f"  {group.name:<10} {group.total:5d} feeds  {newest}; "
+            f"  {group.name:<10} {group.total:5d} feeds  {refreshed}; "
             f"{len(group.stale)} not rebuilt in {stale_days:g} days; {len(group.missing)} missing"
         )
 
@@ -72,7 +77,7 @@ def format_local_feed_status(
     for group in groups:
         if not group.total:
             continue
-        behind = group.newest is None or now - group.newest > stale_days * 24 * 60 * 60
+        behind = group.last_refresh is None or now - group.last_refresh > stale_days * 24 * 60 * 60
         if not behind:
             continue
         if group.name == "bandcamp":

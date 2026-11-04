@@ -333,8 +333,8 @@ def _record_refresh(source_id: str, now: float, error: Optional[BaseException] =
     _refresh_state_path(source_id).write_text(dump_refresh_state(state), encoding="utf-8")
 
 
-def _bridge_health_text() -> str:
-    from netnewswire_feed_booster.bridge_health import format_bridge_health, parse_refresh_state, summarize_bridge_health
+def _bridge_health():
+    from netnewswire_feed_booster.bridge_health import parse_refresh_state, summarize_bridge_health
     from netnewswire_feed_booster.generated_adapters import BANDCAMP_ADAPTER, EMAIL_ADAPTER, adapter_for_source
 
     _reload_cache_volume()
@@ -360,7 +360,7 @@ def _bridge_health_text() -> str:
         times = [stamp for stamp in (_build_time(_cache_path(source_id)), _build_time(_seed_path(source_id))) if stamp is not None]
         if times:
             built[source_id] = max(times)
-    health = summarize_bridge_health(
+    return summarize_bridge_health(
         source_ids,
         states,
         cached,
@@ -371,7 +371,18 @@ def _bridge_health_text() -> str:
         email=email_ids,
         built=built,
     )
-    return format_bridge_health(health)
+
+
+def _bridge_health_text() -> str:
+    from netnewswire_feed_booster.bridge_health import format_bridge_health
+
+    return format_bridge_health(_bridge_health())
+
+
+def _status_feed_rss() -> str:
+    from netnewswire_feed_booster.bridge_health import render_status_feed
+
+    return render_status_feed(_bridge_health())
 
 
 def _build_time(path: Path) -> Optional[float]:
@@ -492,6 +503,14 @@ def web():
         if not _token_is_valid(feed_token):
             raise HTTPException(status_code=404, detail="Unknown feed")
         return PlainTextResponse(_bridge_health_text(), headers={"Cache-Control": "no-store"})
+
+    @web_app.get("/feeds/{feed_token}/status.rss")
+    def status_feed(feed_token: str):
+        # The health report as a feed, so a due catch-up or a failing feed
+        # shows up in the reader. Built per request from the cache volume.
+        if not _token_is_valid(feed_token):
+            raise HTTPException(status_code=404, detail="Unknown feed")
+        return Response(content=_status_feed_rss(), media_type="application/rss+xml; charset=utf-8", headers={"Cache-Control": READER_CACHE_CONTROL})
 
     async def inbound_email(request):
         # Outside /feeds/<token>/ and behind its own secret: the caller is the

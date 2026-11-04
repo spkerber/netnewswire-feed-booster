@@ -1,4 +1,5 @@
 import unittest
+import xml.etree.ElementTree as ET
 
 import isolated_env  # Clears private profile settings; keep above package imports.
 from netnewswire_feed_booster.bridge_health import (
@@ -7,6 +8,7 @@ from netnewswire_feed_booster.bridge_health import (
     format_bridge_health,
     parse_refresh_state,
     record_refresh,
+    render_status_feed,
     short_error,
     summarize_bridge_health,
 )
@@ -136,7 +138,7 @@ class SummaryTests(unittest.TestCase):
         health = summarize_bridge_health(ids, {}, {}, set(ids), NOW, 12 * HOUR, refresh_off=set(ids), built=built)
         report = format_bridge_health(health)
 
-        self.assertEqual(health.last_catch_up, NOW - 3 * DAY)
+        self.assertEqual(health.last_catch_up, NOW - 3 * DAY - HOUR)
         self.assertEqual(health.missed_catch_up, [("bandcamp-failing", NOW - 70 * DAY), ("bandcamp-undated", None)])
         self.assertFalse(health.catch_up_due)
         self.assertFalse(health.has_problems)
@@ -144,6 +146,16 @@ class SummaryTests(unittest.TestCase):
         self.assertNotIn("Catch-up due", report)
         self.assertIn("Refresh off and missed by the last catch-up; serving an older copy (2):", report)
         self.assertIn("  bandcamp-undated\tno build date\n  bandcamp-failing\t2026-11-06\n", report)
+
+    def test_a_source_added_since_does_not_pass_for_a_catch_up(self) -> None:
+        ids = [f"bandcamp-{number}" for number in range(5)] + ["bandcamp-new"]
+        built = {**{f"bandcamp-{number}": NOW - 20 * DAY for number in range(5)}, "bandcamp-new": NOW - HOUR}
+
+        health = summarize_bridge_health(ids, {}, {}, set(ids), NOW, 12 * HOUR, refresh_off=set(ids), built=built)
+
+        self.assertEqual(health.last_catch_up, NOW - 20 * DAY)
+        self.assertTrue(health.catch_up_due)
+        self.assertEqual(health.missed_catch_up, [])
 
     def test_a_catch_up_is_due_after_two_weeks(self) -> None:
         built = {"bandcamp-a": NOW - 15 * DAY}
@@ -209,6 +221,80 @@ class SummaryTests(unittest.TestCase):
 
         self.assertEqual(health.email_quiet, ["email-weekly"])
         self.assertIn("(1 with no mail in 7 days)", format_bridge_health(health))
+
+
+
+class StatusFeedTests(unittest.TestCase):
+    def items(self, health):
+        channel = ET.fromstring(render_status_feed(health)).find("channel")
+        self.assertEqual(channel.findtext("title"), "Feed Booster status")
+        return {item.findtext("guid"): item for item in channel.findall("item")}
+
+    def test_all_quiet_means_an_empty_feed(self) -> None:
+        health = summarize_bridge_health(["nts-ok"], {"nts-ok": RefreshState(last_attempt=NOW, last_success=NOW)}, {"nts-ok": NOW}, set(), NOW, 12 * HOUR)
+
+        self.assertEqual(self.items(health), {})
+
+    def test_each_catch_up_gets_one_item_naming_what_it_missed(self) -> None:
+        ids = ["bandcamp-a", "bandcamp-b", "bandcamp-failing"]
+        built = {"bandcamp-a": NOW - 2 * DAY, "bandcamp-b": NOW - 2 * DAY, "bandcamp-failing": NOW - 60 * DAY}
+        health = summarize_bridge_health(ids, {}, {}, set(ids), NOW, 12 * HOUR, refresh_off=set(ids), built=built)
+
+        items = self.items(health)
+
+        self.assertEqual(list(items), ["bandcamp-catch-up-2027-01-13"])
+        item = items["bandcamp-catch-up-2027-01-13"]
+        self.assertEqual(item.findtext("title"), "Bandcamp feeds caught up on 2027-01-13")
+        self.assertEqual(item.findtext("pubDate"), "Wed, 13 Jan 2027 08:00:00 +0000")
+        self.assertIn("1 feed wasn't rebuilt and still serves an older copy", item.findtext("description"))
+        self.assertIn("<code>bandcamp-failing</code>: 2026-11-16", item.findtext("description"))
+
+    def test_a_due_catch_up_adds_a_reminder_dated_when_it_came_due(self) -> None:
+        built = {"bandcamp-a": NOW - 20 * DAY}
+        health = summarize_bridge_health(["bandcamp-a"], {}, {}, {"bandcamp-a"}, NOW, 12 * HOUR, refresh_off={"bandcamp-a"}, built=built)
+
+        reminder = self.items(health)["bandcamp-catch-up-due-2026-12-26"]
+
+        self.assertEqual(reminder.findtext("title"), "Time to catch up Bandcamp: last catch-up was 2026-12-26")
+        self.assertEqual(reminder.findtext("pubDate"), "Sat, 09 Jan 2027 08:00:00 +0000")
+        self.assertIn("./scripts/netnewswire_workflow.sh catch-up", reminder.findtext("description"))
+
+    def test_the_reminder_keeps_its_guid_while_the_catch_up_stays_due(self) -> None:
+        built = {"bandcamp-a": NOW - 20 * DAY}
+        guids = [
+            set(self.items(summarize_bridge_health(["bandcamp-a"], {}, {}, {"bandcamp-a"}, now, 12 * HOUR, refresh_off={"bandcamp-a"}, built=built)))
+            for now in (NOW, NOW + 3 * DAY)
+        ]
+
+        self.assertEqual(guids[0], guids[1])
+
+    def test_feeds_failing_for_a_while_or_with_nothing_to_serve_need_attention(self) -> None:
+        states = {
+            "nts-broken": RefreshState(last_attempt=NOW, last_success=NOW - 5 * DAY, last_error="ValueError: <bad> page", consecutive_failures=3),
+            "nts-hiccup": RefreshState(last_attempt=NOW, last_success=NOW - DAY, last_error="TimeoutError: slow", consecutive_failures=2),
+        }
+        health = summarize_bridge_health(["nts-broken", "nts-hiccup", "nts-empty"], states, {"nts-broken": NOW, "nts-hiccup": NOW}, set(), NOW, 12 * HOUR)
+
+        items = self.items(health)
+
+        self.assertEqual(len(items), 1)
+        guid, item = next(iter(items.items()))
+        self.assertTrue(guid.startswith("attention-"))
+        self.assertEqual(item.findtext("title"), "2 generated feeds need attention")
+        self.assertIsNone(item.find("pubDate"))
+        description = item.findtext("description")
+        self.assertIn("<code>nts-broken</code>: 3 failed refreshes in a row. ValueError: &lt;bad&gt; page", description)
+        self.assertIn("<code>nts-empty</code>: nothing to serve", description)
+        self.assertNotIn("nts-hiccup", description)
+
+    def test_a_new_attention_item_appears_only_when_the_set_changes(self) -> None:
+        def guid(failing_ids):
+            states = {source_id: RefreshState(last_attempt=NOW, consecutive_failures=4, last_error="x") for source_id in failing_ids}
+            health = summarize_bridge_health(failing_ids, states, {source_id: NOW for source_id in failing_ids}, set(), NOW, 12 * HOUR)
+            return next(iter(self.items(health)))
+
+        self.assertEqual(guid(["a", "b"]), guid(["b", "a"]))
+        self.assertNotEqual(guid(["a", "b"]), guid(["a", "b", "c"]))
 
 
 if __name__ == "__main__":

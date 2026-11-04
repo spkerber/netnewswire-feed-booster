@@ -70,7 +70,14 @@ from .bridge_policy import (
     bandcamp_refresh_setting,
     refresh_route_plan,
 )
-from .hosted_bandcamp import BandcampBotCheck, bandcamp_fetch_url, bandcamp_items_for_source, sources_with_hosted_generated_feeds
+from .hosted_bandcamp import (
+    BandcampBotCheck,
+    bandcamp_fetch_url,
+    bandcamp_items_for_source,
+    hosted_status_feed_url,
+    sources_with_hosted_generated_feeds,
+)
+from .bridge_health import STATUS_FEED_TITLE
 from .hosted_bandcamp import render_bandcamp_source_rss
 from .local_feeds import DEFAULT_STALE_DAYS, format_local_feed_status, local_feed_group
 from .nts import parse_nts_show_html
@@ -200,6 +207,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--bandcamp-feed-token",
         default=os.environ.get("RSS_FEED_TOKEN", os.environ.get("BANDCAMP_FEED_TOKEN", "")),
         help="Token path segment for hosted generated feed URLs. Defaults to RSS_FEED_TOKEN, then BANDCAMP_FEED_TOKEN.",
+    )
+    export_parser.add_argument(
+        "--no-status-feed",
+        action="store_true",
+        help="Leave the bridge's own status feed out of a hosted export",
     )
 
     list_parser = subparsers.add_parser("list", help="List sources")
@@ -1004,9 +1016,25 @@ def main(argv: Optional[list[str]] = None) -> int:
             if not args.bandcamp_feed_token:
                 parser.error("--bandcamp-feed-token is required when --bandcamp-feed-base is set")
             sources = sources_with_hosted_generated_feeds(sources, args.bandcamp_feed_base, token=args.bandcamp_feed_token)
+        exported = len(sources)
+        if args.bandcamp_feed_base and not args.no_status_feed:
+            # Not a registry source: the bridge builds it from its own health,
+            # so the reader can say when a catch-up is due.
+            sources = sources + [
+                Source(
+                    id="feed-booster-status",
+                    title=STATUS_FEED_TITLE,
+                    feed_url=hosted_status_feed_url(args.bandcamp_feed_base, args.bandcamp_feed_token),
+                    kind="other",
+                    profiles=[args.profile],
+                    source="bridge-status",
+                )
+            ]
         title = args.title or f"netnewswire-feed-booster: {args.profile}"
         write_opml(args.out, sources, title=title)
-        print(f"Exported {len(sources)} active sources.")
+        print(f"Exported {exported} active sources.")
+        if len(sources) > exported:
+            print(f'Included the bridge\'s "{STATUS_FEED_TITLE}" feed; pass --no-status-feed to leave it out.')
         return 0
 
     if args.command == "list":

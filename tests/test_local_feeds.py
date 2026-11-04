@@ -34,9 +34,21 @@ class LocalFeedStatusTests(unittest.TestCase):
 
         group = local_feed_group("bandcamp", ["bandcamp-fresh", "bandcamp-failing", "bandcamp-new"], self.out_dir, NOW, 14)
 
-        self.assertEqual((group.total, group.newest), (3, NOW - 2 * DAY))
+        self.assertEqual((group.total, group.last_refresh), (3, NOW - 2 * DAY))
         self.assertEqual(group.stale, [("bandcamp-failing", NOW - 40 * DAY)])
         self.assertEqual(group.missing, ["bandcamp-new"])
+
+    def test_one_new_feed_does_not_pass_for_a_refresh(self) -> None:
+        for number in range(5):
+            touch(self.out_dir / f"bandcamp-{number}.rss", NOW - 20 * DAY)
+        touch(self.out_dir / "bandcamp-new.rss", NOW - DAY)
+        ids = [f"bandcamp-{number}" for number in range(5)] + ["bandcamp-new"]
+
+        group = local_feed_group("bandcamp", ids, self.out_dir, NOW, 14)
+        report = format_local_feed_status([group], self.out_dir, "me", NOW, 14)
+
+        self.assertEqual(group.last_refresh, NOW - 20 * DAY)
+        self.assertIn("Bandcamp feeds have not been rebuilt in 14 days", report)
 
     def test_current_feeds_get_no_advice(self) -> None:
         touch(self.out_dir / "bandcamp-a.rss", NOW - DAY)
@@ -44,7 +56,7 @@ class LocalFeedStatusTests(unittest.TestCase):
 
         report = format_local_feed_status(groups, self.out_dir, "me", NOW, 14)
 
-        self.assertIn("bandcamp       1 feeds  newest rebuilt 2027-01-14, 1 day ago; 0 not rebuilt in 14 days; 0 missing", report)
+        self.assertIn("bandcamp       1 feeds  last refreshed 2027-01-14, 1 day ago; 0 not rebuilt in 14 days; 0 missing", report)
         self.assertIn("other          0 feeds  none built yet", report)
         self.assertNotIn("refresh-local", report)
 
@@ -106,7 +118,7 @@ class LocalFeedStatusCliTests(unittest.TestCase):
 
         report = stdout.getvalue()
         self.assertEqual(code, 0)
-        self.assertRegex(report, r"bandcamp\s+1 feeds  newest rebuilt \S+, 30 days ago; 1 not rebuilt in 14 days; 0 missing")
+        self.assertRegex(report, r"bandcamp\s+1 feeds  last refreshed \S+, 30 days ago; 1 not rebuilt in 14 days; 0 missing")
         self.assertRegex(report, r"other\s+1 feeds  none built yet; 0 not rebuilt in 14 days; 1 missing")
         self.assertIn("  nts-show", report)
         for absent in ("blog", "email-letters", "bandcamp-paused"):

@@ -47,6 +47,14 @@ def hosted_generated_feed_url(base_url: str, source_id: str, token: str = "") ->
     return f"{base}/feeds/{token}/generated/{source_id}.rss"
 
 
+def hosted_status_feed_url(base_url: str, token: str) -> str:
+    """The bridge's own status feed: what it needs from its owner, read in the reader."""
+    token = token.strip("/")
+    if not token:
+        raise ValueError("The hosted status feed URL requires a token path segment")
+    return f"{base_url.rstrip('/')}/feeds/{token}/status.rss"
+
+
 def sources_with_hosted_generated_feeds(sources: Iterable[Source], base_url: str, token: str = "") -> List[Source]:
     """Rewrite every recognized generated source (Bandcamp included) to its hosted URL."""
     rewritten: List[Source] = []

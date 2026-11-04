@@ -105,6 +105,8 @@ It runs `refresh-bandcamp-local-feeds` and `refresh-generated-local-feeds`, then
 
 It rebuilds the Bandcamp feeds here and deploys them. See [Catching Up Bandcamp](hosting.md#catching-up-bandcamp) for what it checks first and what happens when a source fails.
 
+With the hosted bridge you don't have to remember. The hosted export includes a **Feed Booster status** feed, so NetNewsWire tells you itself when a catch-up is due, confirms each one with a list of the feeds it missed, and flags any feed that stops working. See [The Status Feed](hosting.md#the-status-feed).
+
 **Checking on them.** `status` is read-only, makes no requests to any source, and works in either setup:
 
 ```bash
@@ -112,7 +114,7 @@ It rebuilds the Bandcamp feeds here and deploys them. See [Catching Up Bandcamp]
 python3 -m netnewswire_feed_booster local-feed-status --profile "$RSS_PROFILE" --list
 ```
 
-It reports, for Bandcamp and for every other generated feed, when the newest file on this Mac was rebuilt, how many haven't been rebuilt in 14 days, and how many were never built. It tells you which command to run when they're behind. With a bridge configured, `status` then prints `bridge-health`, which says when a Bandcamp catch-up is due. `--list` names each feed not rebuilt recently. A Bandcamp feed that stays on that list after refreshes keeps failing; so does any feed on a Mac-only setup. With the hosted bridge, old local copies of the other feeds are expected, because the bridge refreshes them, not your Mac.
+It reports, for Bandcamp and for every other generated feed, when most of the files on this Mac were last rebuilt (so one source added since doesn't pass for a full refresh), how many haven't been rebuilt in 14 days, and how many were never built. It tells you which command to run when they're behind. With a bridge configured, `status` then prints `bridge-health`, which says when a Bandcamp catch-up is due. `--list` names each feed not rebuilt recently. A Bandcamp feed that stays on that list after refreshes keeps failing; so does any feed on a Mac-only setup. With the hosted bridge, old local copies of the other feeds are expected, because the bridge refreshes them, not your Mac.
 
 After adding or removing a generated source on an already configured Modal host, redeploy the hosted bridge, then export hosted OPML:
 

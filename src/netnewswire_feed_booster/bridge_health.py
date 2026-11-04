@@ -11,10 +11,14 @@ never feed URLs, tokens, or content.
 
 from __future__ import annotations
 
+import hashlib
+import html
 import json
 import re
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from email.utils import format_datetime
 from typing import Iterable, List, Mapping, Optional, Set, Tuple
 
 
@@ -29,6 +33,11 @@ DEFAULT_CATCH_UP_DUE_DAYS = 14
 # A refresh-off copy built this long before the newest one was missed by the last catch-up.
 CATCH_UP_MISSED_AFTER_SECONDS = 24 * 60 * 60
 DEFAULT_LIST_LIMIT = 40
+STATUS_FEED_TITLE = "Feed Booster status"
+# A failing feed needs its owner once it has outlasted a passing hiccup: at the
+# default 12-hour interval, three failures in a row is a day and a half.
+ATTENTION_AFTER_FAILURES = 3
+WORKFLOW = "./scripts/netnewswire_workflow.sh"
 _URL_PATTERN = re.compile(r"\bhttps?://\S+")
 
 
@@ -140,7 +149,9 @@ def summarize_bridge_health(
     failing or stale: their last refresh outcome is history, not a live problem.
 
     `built` maps refresh-off sources to when the copy they serve was built.
-    The newest of those is the last catch-up; a source built well before it
+    The last catch-up is the build time most of them share, the median: a
+    catch-up rebuilds nearly all of them within the hour, while one source
+    added since must not pass for a catch-up. A source built well before it
     was missed by that catch-up, usually because it failed.
 
     Sources in `email` are never refreshed; each accepted message records a
@@ -187,7 +198,7 @@ def summarize_bridge_health(
     built = built or {}
     build_times = [built[source_id] for source_id in health.refresh_off if source_id in built]
     if build_times:
-        health.last_catch_up = max(build_times)
+        health.last_catch_up = sorted(build_times)[len(build_times) // 2]
         cutoff = health.last_catch_up - CATCH_UP_MISSED_AFTER_SECONDS
         health.missed_catch_up = [
             (source_id, built.get(source_id))
@@ -273,6 +284,106 @@ def format_bridge_health(health: BridgeHealth, list_limit: int = DEFAULT_LIST_LI
         ],
     )
     return "\n".join(lines) + "\n"
+
+
+def render_status_feed(health: BridgeHealth, list_limit: int = DEFAULT_LIST_LIMIT) -> str:
+    """An RSS feed of what the bridge needs from its owner, read in the reader itself.
+
+    Items have stable GUIDs, so each one shows up once:
+    - one per catch-up, naming the feeds it missed;
+    - one when the next catch-up comes due;
+    - one each time the set of feeds needing attention changes.
+    A feed needs attention when it has failed several refreshes in a row, or
+    when it has nothing to serve at all. Quiet email sources and passing
+    failures are left to bridge-health.
+    """
+
+    def day(timestamp: float) -> str:
+        return datetime.fromtimestamp(timestamp, tz=timezone.utc).strftime("%Y-%m-%d")
+
+    def listed(rows: List[str]) -> str:
+        shown = "".join(f"<li>{row}</li>" for row in rows[:list_limit])
+        more = f"<li>... and {len(rows) - list_limit} more</li>" if len(rows) > list_limit else ""
+        return f"<ul>{shown}{more}</ul>"
+
+    def code(value: str) -> str:
+        return f"<code>{html.escape(value)}</code>"
+
+    items: List[Tuple[str, str, Optional[float], str]] = []
+    errors = {source_id: (count, error) for source_id, count, error in health.failing}
+    attention = sorted(
+        {source_id for source_id, (count, _error) in errors.items() if count >= ATTENTION_AFTER_FAILURES}
+        | set(health.nothing_to_serve)
+    )
+    if attention:
+        rows = []
+        for source_id in attention:
+            if source_id in errors:
+                count, error = errors[source_id]
+                rows.append(f"{code(source_id)}: {count} failed refreshes in a row. {html.escape(error)}")
+            else:
+                rows.append(f"{code(source_id)}: nothing to serve, so readers get \"waiting for its scheduled refresh\".")
+        digest = hashlib.sha256("\n".join(attention).encode("utf-8")).hexdigest()[:16]
+        count = len(attention)
+        items.append(
+            (
+                f"attention-{digest}",
+                f"{count} generated feed{'s' if count != 1 else ''} need{'' if count != 1 else 's'} attention",
+                None,
+                f"<p>These feeds aren't getting new items. Run {code(f'{WORKFLOW} bridge-health')} for the full report.</p>"
+                + listed(rows),
+            )
+        )
+    if health.catch_up_due:
+        due_at = health.last_catch_up + health.catch_up_due_after_seconds
+        items.append(
+            (
+                f"bandcamp-catch-up-due-{day(health.last_catch_up)}",
+                f"Time to catch up Bandcamp: last catch-up was {day(health.last_catch_up)}",
+                due_at,
+                f"<p>The bridge is still serving Bandcamp feeds rebuilt on {day(health.last_catch_up)}. "
+                f"Run {code(f'{WORKFLOW} catch-up')} on your Mac to bring them up to date.</p>",
+            )
+        )
+    if health.last_catch_up is not None:
+        description = f"<p>The bridge is serving Bandcamp feeds rebuilt on {day(health.last_catch_up)}.</p>"
+        if health.missed_catch_up:
+            missed = len(health.missed_catch_up)
+            weren_t, serve = ("weren't", "serve") if missed != 1 else ("wasn't", "serves")
+            description += (
+                f"<p>{missed} {'feeds' if missed != 1 else 'feed'} {weren_t} rebuilt and still {serve} an older copy. "
+                "One that is missed catch-up after catch-up keeps failing:</p>"
+                + listed(
+                    [
+                        f"{code(source_id)}: {day(built_at) if built_at is not None else 'no build date'}"
+                        for source_id, built_at in sorted(health.missed_catch_up, key=lambda row: (row[1] or 0, row[0]))
+                    ]
+                )
+            )
+        items.append(
+            (
+                f"bandcamp-catch-up-{day(health.last_catch_up)}",
+                f"Bandcamp feeds caught up on {day(health.last_catch_up)}",
+                health.last_catch_up,
+                description,
+            )
+        )
+
+    rss = ET.Element("rss", {"version": "2.0"})
+    channel = ET.SubElement(rss, "channel")
+    ET.SubElement(channel, "title").text = STATUS_FEED_TITLE
+    ET.SubElement(channel, "description").text = "What the hosted bridge needs from you. An item appears only when something changes."
+    ET.SubElement(channel, "lastBuildDate").text = format_datetime(datetime.fromtimestamp(health.checked_at, tz=timezone.utc))
+    for guid, title, published, description in items:
+        item = ET.SubElement(channel, "item")
+        ET.SubElement(item, "title").text = title
+        ET.SubElement(item, "guid", {"isPermaLink": "false"}).text = guid
+        if published is not None:
+            # Undated items are dated by the reader when it first sees them.
+            ET.SubElement(item, "pubDate").text = format_datetime(datetime.fromtimestamp(published, tz=timezone.utc))
+        ET.SubElement(item, "description").text = description
+    ET.indent(rss, space="  ")
+    return '<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(rss, encoding="unicode") + "\n"
 
 
 def _number(value) -> Optional[float]:

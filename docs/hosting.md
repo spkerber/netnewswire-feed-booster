@@ -80,6 +80,24 @@ With Bandcamp refresh off, the report says "Catch-up due" once the last catch-up
 
 The route reads only the cache volume. State written before success tracking holds only the last attempt, so until every source has been refreshed once the report falls back to each cache file's age. That makes the first reports after this change overstate staleness, never understate it.
 
+### The Status Feed
+
+`bridge-health` only helps when you remember to run it. The bridge therefore also serves the same report as a feed, at `/feeds/<token>/status.rss`, so NetNewsWire itself tells you when the bridge needs something. A hosted `export` includes it as **Feed Booster status**, at the top level of the OPML. Pass `--no-status-feed` to `export-opml` to leave it out.
+
+It is built from the bridge's own records on each request, the same way the health report is, and never fetches upstream. Items have stable identifiers, so each one shows up once:
+
+| Item | When it appears |
+| --- | --- |
+| Bandcamp feeds caught up on *date* | After each catch-up, listing any Bandcamp feed it didn't rebuild |
+| Time to catch up Bandcamp | When the last catch-up is more than 14 days old |
+| *N* generated feeds need attention | When a feed has failed three refreshes in a row, or has nothing to serve. A new item appears only when that set of feeds changes |
+
+When nothing needs you, the feed holds only the last catch-up. A failure that clears up within a day, and email sources that are merely quiet, stay in `bridge-health`.
+
+The catch-up date is the date most Bandcamp feeds share, not the newest one, so adding a single Bandcamp source and deploying doesn't pass for a catch-up.
+
+Adding the status feed to an existing setup takes one export. Run `./scripts/netnewswire_workflow.sh export` after deploying a bridge that serves it, then import the new OPML or run `repair-netnewswire`. `verify-netnewswire` reports the status feed as missing until you do.
+
 ### Seeds Come From Your Checkout
 
 Deploys bundle `exports/generated` from the local checkout as seeds. A source the bridge has never refreshed serves that copy, which is only as fresh as your last local refresh. A source with no local file has nothing to serve until its first scheduled refresh.
@@ -98,7 +116,7 @@ Since October 2026 Bandcamp has answered every request from Modal with a bot che
 
 `catch-up` rebuilds every Bandcamp feed on this Mac (`refresh-bandcamp-local-feeds`), then deploys, so each rebuilt feed replaces the bridge's older copy. Before refreshing anything, it checks that the deploy can run, because a large collection takes a while: about a second per source, plus one discography lookup each. It saves progress every 20 sources, so an interrupted run loses little. If Bandcamp answers your Mac with a bot check too, it stops and deploys nothing. A single source that fails doesn't stop the run; that feed keeps serving its last good copy.
 
-Every two weeks or so is plenty for new releases. `bridge-health` tells you when a catch-up is due, and `./scripts/netnewswire_workflow.sh status` shows both views at once: how old the feeds on this Mac are, then the bridge's report. A feed that shows up in "missed by the last catch-up" run after run keeps failing. The catch-up output names it on a `FAILED` line, along with the kind of error.
+Every two weeks or so is plenty for new releases. The [status feed](#the-status-feed) tells you in NetNewsWire when a catch-up is due, and so does `bridge-health`. `./scripts/netnewswire_workflow.sh status` shows both views at once: how old the feeds on this Mac are, then the bridge's report. A feed that shows up in "missed by the last catch-up" run after run keeps failing. The catch-up output names it on a `FAILED` line, along with the kind of error.
 
 ## Email Sources (Optional, Future)
 
