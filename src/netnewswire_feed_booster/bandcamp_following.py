@@ -8,7 +8,7 @@ from typing import Callable, List, Optional
 from urllib.parse import urlparse
 
 from .bandcamp import extract_bandcamp_pagedata
-from .feed_store import Source, slugify, unique_id
+from .feed_store import Source, slugify, unique_id, valid_bandcamp_band_id
 from .http_client import fetch_json_post, fetch_text
 
 
@@ -78,6 +78,7 @@ def import_bandcamp_following(
     group: str = "Bandcamp",
     fetcher: Callable[[str], str] = _default_page_fetcher,
     post_page: Optional[Callable[[str, int, str, int], dict]] = None,
+    include_fans: bool = True,
 ) -> List[Source]:
     """Import everyone a Bandcamp fan account follows: artists/labels and other fans.
 
@@ -98,6 +99,8 @@ def import_bandcamp_following(
     base_url = profile_url.rstrip("/")
     bands_html = fetcher(f"{base_url}/following/artists_and_labels")
     bands = fetch_bandcamp_following_bands(bands_html, profile=profile, group=group, out_dir=out_dir, post_page=post_page)
+    if not include_fans:
+        return bands
 
     try:
         fans_html = fetcher(f"{base_url}/following/fans")
@@ -234,7 +237,10 @@ def bandcamp_following_band_source(item: dict, profile: str, group: str, out_dir
     if not name or not (subdomain or custom_domain):
         return None
     site_url = f"https://{custom_domain}" if custom_domain else f"https://{subdomain}.bandcamp.com"
-    return _bandcamp_following_source(name=name, site_url=site_url, is_fan=False, profile=profile, group=group, out_dir=out_dir)
+    source = _bandcamp_following_source(name=name, site_url=site_url, is_fan=False, profile=profile, group=group, out_dir=out_dir)
+    # Kept so a custom-domain storefront can be refreshed from its discography.
+    source.bandcamp_band_id = valid_bandcamp_band_id(item.get("band_id"))
+    return source
 
 
 def bandcamp_following_fan_source(item: dict, profile: str, group: str, out_dir: Path) -> Optional[Source]:

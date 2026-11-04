@@ -215,6 +215,29 @@ def fetch_json_post(
     validation, DNS-rebinding check, and size cap as fetch_text — a raw
     urllib.request.urlopen call gets none of those for free.
     """
+    return json.loads(
+        fetch_text_post(
+            url,
+            payload,
+            allowed_hosts=allowed_hosts,
+            allowed_suffixes=allowed_suffixes,
+            max_bytes=max_bytes,
+            timeout=timeout,
+        )
+    )
+
+
+def fetch_text_post(
+    url: str,
+    payload: dict[str, Any],
+    *,
+    allowed_hosts: Optional[set[str] | frozenset[str]] = None,
+    allowed_suffixes: Optional[set[str] | frozenset[str]] = None,
+    max_bytes: int = DEFAULT_MAX_FETCH_BYTES,
+    timeout: int = 30,
+) -> str:
+    """fetch_json_post without the parse, for a caller that must look at the
+    response before trusting it as JSON (a bot-check page, say)."""
     _validate_fetch_url(url, allowed_hosts=allowed_hosts, allowed_suffixes=allowed_suffixes)
     body = json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(
@@ -228,4 +251,4 @@ def fetch_json_post(
         response_body = response.read(max_bytes + 1)
     if len(response_body) > max_bytes:
         raise ValueError(f"Response exceeded {max_bytes} byte limit: {url}")
-    return json.loads(response_body.decode("utf-8"))
+    return response_body.decode("utf-8")

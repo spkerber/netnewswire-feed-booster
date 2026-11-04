@@ -9,17 +9,21 @@ from email.utils import format_datetime, parsedate_to_datetime
 from html import unescape
 from pathlib import Path
 from typing import Callable, List, Optional
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 from .feed_store import Source, source_id_from_title
 from .http_client import fetch_json_post
-from .rss_safety import html_text, image_html
+from .rss_safety import html_text, image_html, safe_https_url
 
 
 BANDCAMP_COLLECTION_API_URL = "https://bandcamp.com/api/fancollection/1/collection_items"
 # An artist's /music page lists releases without dates. This per-artist
 # discography carries a release date for each one, at one request per artist.
 BANDCAMP_BAND_DETAILS_API_URL = "https://bandcamp.com/api/mobile/24/band_details"
+# The discography leaves out each release's page URL; this per-release lookup
+# has it. It is used only for releases a discography-built feed hasn't linked yet.
+BANDCAMP_TRALBUM_DETAILS_API_URL = "https://bandcamp.com/api/mobile/24/tralbum_details"
+BANDCAMP_RELEASE_URL_LOOKUPS_PER_REFRESH = 10
 BANDCAMP_USER_AGENT = "netnewswire-feed-booster/0.1"
 BANDCAMP_API_HOSTS = frozenset({"bandcamp.com"})
 
@@ -38,6 +42,8 @@ class BandcampCollectionItem:
 
 
 PostBandDetails = Callable[[int], dict]
+# Takes a release key ("album-123"), returns that release's page URL.
+LookupReleaseUrl = Callable[[str], str]
 
 
 @dataclass
@@ -311,6 +317,108 @@ def add_bandcamp_release_dates(
         else item
         for item in items
     ]
+
+
+def bandcamp_discography_items(
+    payload: dict,
+    site_url: str,
+    known_urls: dict[int, str],
+    lookup_release_url: LookupReleaseUrl,
+    max_items: Optional[int] = 50,
+    max_lookups: int = BANDCAMP_RELEASE_URL_LOOKUPS_PER_REFRESH,
+) -> List[BandcampCollectionItem]:
+    """An artist's releases from its band_details discography, newest first.
+
+    The discography has each release's title, artist, date, and artwork, but
+    not its page URL. A release the previous feed already linked keeps that
+    link (`known_urls`, by artwork id), so a reader doesn't take it for new.
+    The rest are looked up newest first, at most `max_lookups` per refresh; a
+    release still without a URL is left out until a later refresh reaches it.
+    Every URL must be an album or track page on the storefront's own host or
+    on bandcamp.com.
+    """
+    discography = payload.get("discography") if isinstance(payload, dict) else None
+    if not isinstance(discography, list):
+        raise ValueError("Bandcamp's band_details response has no discography")
+
+    band_name = str(payload.get("name") or "").strip()
+    releases: List[tuple[BandcampCollectionItem, int]] = []
+    for release in discography:
+        if not isinstance(release, dict):
+            continue
+        key = _release_key(release.get("item_type"), release.get("item_id"))
+        title = str(release.get("title") or "").strip()
+        if not key or not title:
+            continue
+        art_id = release.get("art_id")
+        art_id = int(art_id) if str(art_id or "").isdigit() else 0
+        released = str(release.get("release_date") or "").strip()
+        item = BandcampCollectionItem(
+            title=title,
+            artist=str(release.get("artist_name") or release.get("band_name") or band_name).strip(),
+            url="",
+            item_type=key.split("-")[0],
+            collected_at=released if rss_pubdate(released) else "",
+            artwork_url=f"https://f4.bcbits.com/img/a{art_id}_10.jpg" if art_id else "",
+            release_key=key,
+        )
+        releases.append((item, art_id))
+    # Stable, so undated releases keep the discography's order, after the dated ones.
+    releases.sort(key=lambda release: _item_sort_key(release[0]), reverse=True)
+
+    items: List[BandcampCollectionItem] = []
+    used_urls: set[str] = set()
+    lookups = 0
+    for item, art_id in releases:
+        if max_items is not None and len(items) >= max_items:
+            break
+        url = _bandcamp_release_url(known_urls.get(art_id, ""), site_url) if art_id else ""
+        if not url or url in used_urls:
+            # Two releases can share a cover, so a known link is used only once.
+            if lookups >= max_lookups:
+                continue
+            lookups += 1
+            url = _bandcamp_release_url(lookup_release_url(item.release_key), site_url)
+        if not url or url in used_urls:
+            continue
+        used_urls.add(url)
+        items.append(replace(item, url=url))
+    return items
+
+
+def bandcamp_release_urls_by_artwork(feed_text: str) -> dict[int, str]:
+    """Release links in a feed this tool wrote, by artwork id.
+
+    Both the /music page and the discography name a release's artwork by the
+    same id, so this joins an earlier feed's links to the discography. An id
+    that two items with different links share is left out, being ambiguous.
+    """
+    try:
+        root = ET.fromstring(feed_text)
+    except ET.ParseError:
+        return {}
+    urls: dict[int, str] = {}
+    ambiguous: set[int] = set()
+    for item in root.iter("item"):
+        link = (item.findtext("link") or "").strip()
+        match = re.search(r"/img/a(\d+)_\d+\.", item.findtext("description") or "")
+        if not link or not match:
+            continue
+        art_id = int(match.group(1))
+        if urls.get(art_id, link) != link:
+            ambiguous.add(art_id)
+        urls[art_id] = link
+    for art_id in ambiguous:
+        del urls[art_id]
+    return urls
+
+
+def _bandcamp_release_url(url: str, site_url: str) -> str:
+    site_host = (urlparse(site_url).hostname or "").lower().rstrip(".")
+    safe_url = safe_https_url(url, allowed_hosts={site_host} if site_host else None, allowed_suffixes={"bandcamp.com"})
+    if not safe_url or not re.fullmatch(r"/(album|track)/[^/?#]+/?", urlparse(safe_url).path):
+        return ""
+    return safe_url
 
 
 def parse_bandcamp_tralbum_html(html: str) -> List[BandcampCollectionItem]:
