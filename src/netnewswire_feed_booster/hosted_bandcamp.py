@@ -23,6 +23,9 @@ from .generated_adapters import hosted_route_for_source
 FetchText = Callable[[str], str]
 
 _BOT_CHECK_TITLE = re.compile(r"<title[^>]*>\s*Client Challenge\s*</title>", re.IGNORECASE)
+# The path of a URL built by hosted_generated_feed_url or hosted_status_feed_url,
+# under any base path.
+_HOSTED_FEED_PATH = re.compile(r"(?P<prefix>.*/feeds/)[^/]+/(?P<feed>status\.rss|generated/(?P<source_id>[^/]+)\.rss)")
 
 
 class BandcampBotCheck(ValueError):
@@ -53,6 +56,37 @@ def hosted_status_feed_url(base_url: str, token: str) -> str:
     if not token:
         raise ValueError("The hosted status feed URL requires a token path segment")
     return f"{base_url.rstrip('/')}/feeds/{token}/status.rss"
+
+
+def _hosted_feed_match(feed_url: str) -> Optional[re.Match]:
+    parsed = urlparse(feed_url)
+    if parsed.scheme not in ("http", "https"):
+        return None
+    return _HOSTED_FEED_PATH.fullmatch(parsed.path)
+
+
+def hosted_generated_source_id(feed_url: str) -> Optional[str]:
+    """The source id in a hosted generated feed URL, read from its shape alone.
+
+    Any token is accepted, so a reader's subscriptions can be matched to the
+    registry without knowing the bridge's token.
+    """
+    match = _hosted_feed_match(feed_url)
+    return match.group("source_id") if match else None
+
+
+def is_hosted_status_feed_url(feed_url: str) -> bool:
+    match = _hosted_feed_match(feed_url)
+    return bool(match) and match.group("feed") == "status.rss"
+
+
+def without_feed_token(feed_url: str) -> str:
+    """Mask the token in a hosted feed URL; any other URL comes back unchanged."""
+    match = _hosted_feed_match(feed_url)
+    if not match:
+        return feed_url
+    path = f"{match.group('prefix')}[token]/{match.group('feed')}"
+    return urlparse(feed_url)._replace(path=path).geturl()
 
 
 def sources_with_hosted_generated_feeds(sources: Iterable[Source], base_url: str, token: str = "") -> List[Source]:

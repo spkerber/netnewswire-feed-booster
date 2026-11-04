@@ -61,7 +61,14 @@ from .feed_health import (
 )
 from .feed_validation import audit_source, audit_sources, discover_feed_url, validate_feed_text
 from .generated_migration import apply_generated_source_migration, plan_generated_source_migration
-from .generated_adapters import BANDCAMP_ADAPTER, EMAIL_ADAPTER, NTS_ADAPTER, WEBPAGE_ADAPTER, adapter_for_source
+from .generated_adapters import (
+    BANDCAMP_ADAPTER,
+    EMAIL_ADAPTER,
+    NTS_ADAPTER,
+    WEBPAGE_ADAPTER,
+    adapter_for_source,
+    hosted_route_for_source,
+)
 from .bridge_policy import (
     BANDCAMP_REFRESH_SETTING,
     DEFAULT_MAX_REFRESH_SOURCES_PER_RUN,
@@ -74,8 +81,11 @@ from .hosted_bandcamp import (
     BandcampBotCheck,
     bandcamp_fetch_url,
     bandcamp_items_for_source,
+    hosted_generated_source_id,
     hosted_status_feed_url,
+    is_hosted_status_feed_url,
     sources_with_hosted_generated_feeds,
+    without_feed_token,
 )
 from .bridge_health import STATUS_FEED_TITLE
 from .hosted_bandcamp import render_bandcamp_source_rss
@@ -1690,18 +1700,30 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 0
 
     if args.command == "reconcile-netnewswire":
-        observed_sources = parse_opml(args.path, profile=args.profile)
+        # The bridge builds its status feed from its own health; no registry source backs it.
+        observed_sources = [
+            source
+            for source in parse_opml(args.path, profile=args.profile)
+            if not is_hosted_status_feed_url(source.feed_url)
+        ]
         observed_feed_urls = {source.feed_url for source in observed_sources}
-        known_feed_urls = {source.feed_url for source in store.sources()}
+        # A hosted export points the reader at bridge URLs while the registry keeps
+        # each generated source's local file URL, so those match by source id.
+        observed_hosted_ids = {hosted_generated_source_id(source.feed_url) for source in observed_sources} - {None}
+        known_sources = store.sources()
+        known_feed_urls = {source.feed_url for source in known_sources}
+        known_hosted_ids = {source.id for source in known_sources if hosted_route_for_source(source) == "generated"}
         missing_from_netnewswire = [
             source
             for source in store.active_sources(args.profile)
             if source.feed_url not in observed_feed_urls
+            and not (source.id in observed_hosted_ids and hosted_route_for_source(source) == "generated")
         ]
         extra_in_netnewswire = [
             source
             for source in observed_sources
             if source.feed_url not in known_feed_urls
+            and hosted_generated_source_id(source.feed_url) not in known_hosted_ids
         ]
 
         print(f"Missing active repo sources from NetNewsWire: {len(missing_from_netnewswire)}")
@@ -1710,7 +1732,9 @@ def main(argv: Optional[list[str]] = None) -> int:
 
         print(f"NetNewsWire sources not in repo: {len(extra_in_netnewswire)}")
         for source in extra_in_netnewswire:
-            print(f"EXTRA\t{source.kind}\t{source.title}\t{display_feed_url(source, args.show_sensitive)}")
+            # Even with --show-sensitive, the bridge token stays out of the output.
+            feed_url = without_feed_token(source.feed_url) if args.show_sensitive else display_feed_url(source)
+            print(f"EXTRA\t{source.kind}\t{source.title}\t{feed_url}")
 
         if args.apply:
             for source in missing_from_netnewswire:
