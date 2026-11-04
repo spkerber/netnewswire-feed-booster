@@ -14,6 +14,7 @@ from netnewswire_feed_booster.feed_health import EMPTY, GONE, FeedHealth
 from netnewswire_feed_booster.feed_validation import FeedValidationResult
 from netnewswire_feed_booster.feed_store import FeedStore, Source
 from netnewswire_feed_booster.opml import write_opml
+from netnewswire_feed_booster.bridge_health import STATUS_FEED_TITLE
 
 
 EMPTY_NETNEWSWIRE_OPML = """<?xml version="1.0" encoding="UTF-8"?>
@@ -728,6 +729,128 @@ class CliTests(unittest.TestCase):
         self.assertEqual(source.status, "unsubscribed")
         self.assertEqual(len(entries), 1)
         self.assertIn("Applied 1 subscription-history entries", output.getvalue())
+
+    def test_reconcile_netnewswire_matches_hosted_export_by_source_id(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            data_path = Path(tmp_dir) / "sources.json"
+            history_path = Path(tmp_dir) / "subscription-history.json"
+            opml_path = Path(tmp_dir) / "netnewswire.opml"
+            store = FeedStore(data_path)
+            for name in ("subscribed", "dropped"):
+                store.add_or_update(
+                    Source(
+                        id=f"bandcamp-{name}-artist",
+                        title=f"Bandcamp: {name.title()} Artist",
+                        feed_url=f"file://{tmp_dir}/exports/generated/bandcamp-{name}-artist.rss",
+                        site_url=f"https://{name}-artist.example.com/",
+                        kind="bandcamp",
+                        profiles=["test-user"],
+                    )
+                )
+            store.add_or_update(
+                Source(
+                    id="direct-fixture",
+                    title="Direct Fixture",
+                    feed_url="https://feeds.example.com/direct.rss",
+                    kind="other",
+                    profiles=["test-user"],
+                )
+            )
+            store.save()
+            # What a hosted export puts in the reader, plus one bridge feed
+            # whose source is gone from the registry.
+            write_opml(
+                opml_path,
+                [
+                    Source(
+                        id="subscribed",
+                        title="Bandcamp: Subscribed Artist",
+                        feed_url="https://bridge.example.com/feeds/fixture-token/generated/bandcamp-subscribed-artist.rss",
+                    ),
+                    Source(
+                        id="removed",
+                        title="Bandcamp: Removed Artist",
+                        feed_url="https://bridge.example.com/feeds/fixture-token/generated/bandcamp-removed-artist.rss",
+                    ),
+                    Source(
+                        id="feed-booster-status",
+                        title=STATUS_FEED_TITLE,
+                        feed_url="https://bridge.example.com/feeds/fixture-token/status.rss",
+                    ),
+                    Source(id="direct", title="Direct Fixture", feed_url="https://feeds.example.com/direct.rss"),
+                ],
+                title="NetNewsWire Export",
+            )
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                main(
+                    [
+                        "--data",
+                        str(data_path),
+                        "--history",
+                        str(history_path),
+                        "reconcile-netnewswire",
+                        str(opml_path),
+                        "--profile",
+                        "test-user",
+                        "--show-sensitive",
+                        "--apply",
+                    ]
+                )
+
+            store = FeedStore(data_path)
+            entries = SubscriptionHistoryStore(history_path).entries()
+
+        rendered = output.getvalue()
+        self.assertIn("Missing active repo sources from NetNewsWire: 1\n", rendered)
+        self.assertIn("MISSING\tbandcamp-dropped-artist\t", rendered)
+        self.assertIn("NetNewsWire sources not in repo: 1\n", rendered)
+        self.assertIn("\tBandcamp: Removed Artist\thttps://bridge.example.com/feeds/[token]/generated/bandcamp-removed-artist.rss\n", rendered)
+        self.assertNotIn("fixture-token", rendered)
+        self.assertNotIn(STATUS_FEED_TITLE, rendered)
+        self.assertEqual(store.source_by_id("bandcamp-subscribed-artist").status, "active")
+        self.assertEqual(store.source_by_id("direct-fixture").status, "active")
+        self.assertEqual(store.source_by_id("bandcamp-dropped-artist").status, "unsubscribed")
+        self.assertEqual([entry.source_id for entry in entries], ["bandcamp-dropped-artist"])
+
+    def test_reconcile_netnewswire_matches_hosted_ids_only_for_generated_sources(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            data_path = Path(tmp_dir) / "sources.json"
+            opml_path = Path(tmp_dir) / "netnewswire.opml"
+            store = FeedStore(data_path)
+            # A direct feed has no bridge route, so a bridge URL with its id
+            # is not a subscription to it.
+            store.add_or_update(
+                Source(
+                    id="direct-fixture",
+                    title="Direct Fixture",
+                    feed_url="https://feeds.example.com/direct.rss",
+                    kind="other",
+                    profiles=["test-user"],
+                )
+            )
+            store.save()
+            write_opml(
+                opml_path,
+                [
+                    Source(
+                        id="direct",
+                        title="Direct Fixture",
+                        feed_url="https://bridge.example.com/feeds/fixture-token/generated/direct-fixture.rss",
+                    )
+                ],
+                title="NetNewsWire Export",
+            )
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                main(["--data", str(data_path), "reconcile-netnewswire", str(opml_path), "--profile", "test-user"])
+
+        rendered = output.getvalue()
+        self.assertIn("MISSING\tdirect-fixture\t", rendered)
+        self.assertIn("NetNewsWire sources not in repo: 1\n", rendered)
+        self.assertIn("Dry run only.", rendered)
 
     def test_export_opml_can_rewrite_bandcamp_to_hosted_base(self) -> None:
         with TemporaryDirectory() as tmp_dir:

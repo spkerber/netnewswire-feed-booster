@@ -6,8 +6,12 @@ from netnewswire_feed_booster.hosted_bandcamp import (
     BandcampBotCheck,
     bandcamp_items_for_source,
     hosted_generated_feed_url,
+    hosted_generated_source_id,
+    hosted_status_feed_url,
+    is_hosted_status_feed_url,
     render_bandcamp_source_rss,
     sources_with_hosted_generated_feeds,
+    without_feed_token,
 )
 
 
@@ -31,6 +35,40 @@ class HostedBandcampTests(unittest.TestCase):
     def test_hosted_generated_feed_url_requires_token(self) -> None:
         with self.assertRaisesRegex(ValueError, "require a token"):
             hosted_generated_feed_url("https://example.modal.run/", "nts-fixture-signal")
+
+    def test_hosted_generated_source_id_reads_any_token_and_base_path(self) -> None:
+        for base in ("https://bridge.example.com", "https://example.com/bridge"):
+            for token in ("fixture-token", "another-token"):
+                url = hosted_generated_feed_url(base, "nts-fixture-signal", token=token)
+                self.assertEqual(hosted_generated_source_id(url), "nts-fixture-signal")
+
+    def test_hosted_generated_source_id_rejects_other_shapes(self) -> None:
+        for url in (
+            "https://bridge.example.com/feeds/generated/nts-fixture-signal.rss",
+            "https://bridge.example.com/feeds/fixture-token/status.rss",
+            "https://bridge.example.com/feeds/fixture-token/generated/nested/nts-fixture-signal.rss",
+            "file:///tmp/feeds/fixture-token/generated/nts-fixture-signal.rss",
+            "https://feeds.example.com/fixture.rss",
+        ):
+            self.assertIsNone(hosted_generated_source_id(url), url)
+
+    def test_is_hosted_status_feed_url(self) -> None:
+        self.assertTrue(is_hosted_status_feed_url(hosted_status_feed_url("https://bridge.example.com", "fixture-token")))
+        self.assertFalse(is_hosted_status_feed_url("https://bridge.example.com/feeds/status.rss"))
+        self.assertFalse(
+            is_hosted_status_feed_url(hosted_generated_feed_url("https://bridge.example.com", "status", token="fixture-token"))
+        )
+
+    def test_without_feed_token_masks_only_hosted_urls(self) -> None:
+        self.assertEqual(
+            without_feed_token(hosted_generated_feed_url("https://bridge.example.com", "nts-fixture-signal", token="fixture-token")),
+            "https://bridge.example.com/feeds/[token]/generated/nts-fixture-signal.rss",
+        )
+        self.assertEqual(
+            without_feed_token(hosted_status_feed_url("https://example.com/bridge/", "fixture-token")),
+            "https://example.com/bridge/feeds/[token]/status.rss",
+        )
+        self.assertEqual(without_feed_token("https://feeds.example.com/fixture.rss"), "https://feeds.example.com/fixture.rss")
 
     def test_sources_with_hosted_generated_feeds_rewrites_only_recognized_sources(self) -> None:
         sources = [
