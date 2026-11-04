@@ -1,6 +1,8 @@
 # Hosted Bridge
 
-Use an HTTPS bridge only for generated local RSS that NetNewsWire cannot refresh reliably through `file://`. Direct HTTPS feeds stay direct.
+Use an HTTPS bridge only for generated local RSS that NetNewsWire cannot refresh reliably through `file://`, which in practice means reading generated feeds on more than one device. Direct HTTPS feeds stay direct. If you read on one Mac only, you don't need any of this: see [Two Setups For Generated Feeds](../README.md#two-setups-for-generated-feeds).
+
+What the bridge refreshes on its own: NTS, Mixcloud, and webpage-recipe feeds, on a schedule. What it doesn't: Bandcamp, which answers Modal with a bot check, so Bandcamp feeds catch up from your Mac instead. See [Catching Up Bandcamp](#catching-up-bandcamp).
 
 The bridge serves one tokenized route for every generated adapter, Bandcamp included:
 
@@ -39,7 +41,7 @@ python3 -m venv .venv-modal
 install -m 600 examples/private.env.example data/private.env
 ```
 
-The tracked example contains placeholders and can remain readable in a public clone. Your copied `data/private.env` holds a real token, so the command creates it with owner-only (`0600`) permissions. Set `RSS_PROFILE`, `RSS_SOURCES_FILE`, `RSS_HISTORY_FILE`, `RSS_FEED_TOKEN`, and unique `MODAL_*` names. Keep the three profile settings aligned, for example `RSS_PROFILE=me`, `RSS_SOURCES_FILE=data/sources.me.json`, and `RSS_HISTORY_FILE=data/subscription-history.me.json`. Leave `RSS_FEED_BASE` as a placeholder until Modal deploy prints the HTTPS endpoint. If a Bandcamp storefront redirects anonymous requests to its own custom domain, add that exact hostname to the comma-separated `BANDCAMP_CUSTOM_DOMAINS` setting in the ignored private file; never add personal redirect hosts to tracked code. The `MODAL_*` values are only for the Modal deployment path; other hosts should use equivalent provider configuration while preserving `RSS_FEED_BASE` and `RSS_FEED_TOKEN`.
+The tracked example contains placeholders and can remain readable in a public clone. Your copied `data/private.env` holds a real token, so the command creates it with owner-only (`0600`) permissions. Set `RSS_PROFILE`, `RSS_SOURCES_FILE`, `RSS_HISTORY_FILE`, `RSS_FEED_TOKEN`, and unique `MODAL_*` names. Keep the three profile settings aligned, for example `RSS_PROFILE=me`, `RSS_SOURCES_FILE=data/sources.me.json`, and `RSS_HISTORY_FILE=data/subscription-history.me.json`. Leave `RSS_FEED_BASE` as a placeholder until Modal deploy prints the HTTPS endpoint. If a Bandcamp storefront redirects anonymous requests to its own custom domain, add that exact hostname to the comma-separated `BANDCAMP_CUSTOM_DOMAINS` setting in the ignored private file; never add personal redirect hosts to tracked code. Leave `RSS_BRIDGE_BANDCAMP_REFRESH=off` as the example sets it: Bandcamp answers Modal with a bot check, so Bandcamp feeds are kept current by [catching up from your Mac](#catching-up-bandcamp) instead. The `MODAL_*` values are only for the Modal deployment path; other hosts should use equivalent provider configuration while preserving `RSS_FEED_BASE` and `RSS_FEED_TOKEN`.
 
 ```bash
 ./scripts/netnewswire_workflow.sh deploy-modal
@@ -71,10 +73,30 @@ This reads `/feeds/<token>/health` on the deployed bridge, which is behind the f
 | stale | No success within three refresh intervals |
 | seed copy only | No cached refresh yet; readers get the copy bundled at deploy |
 | nothing to serve | No cache and no seed; readers get "waiting for its scheduled refresh" |
-| refresh off | Shown only with `RSS_BRIDGE_BANDCAMP_REFRESH=off`: Bandcamp sources the bridge no longer refreshes, kept out of failing and stale |
-| email | Shown only when there are [email sources](#email-sources): each one's last accepted message. One with no mail in 30 days is called quiet, which is information, not a failure |
+| refresh off | Shown only with `RSS_BRIDGE_BANDCAMP_REFRESH=off`: Bandcamp sources the bridge no longer refreshes, kept out of failing and stale, with the date of the last [catch-up](#catching-up-bandcamp) |
+| email | Shown only when there are [email sources](#email-sources-optional-future): each one's last accepted message. One with no mail in 30 days is called quiet, which is information, not a failure |
+
+With Bandcamp refresh off, the report says "Catch-up due" once the last catch-up is more than 14 days old. It also lists every Bandcamp feed that catch-up didn't rebuild, usually because that source failed, with the date of the copy it still serves.
 
 The route reads only the cache volume. State written before success tracking holds only the last attempt, so until every source has been refreshed once the report falls back to each cache file's age. That makes the first reports after this change overstate staleness, never understate it.
+
+### The Status Feed
+
+`bridge-health` only helps when you remember to run it. The bridge therefore also serves the same report as a feed, at `/feeds/<token>/status.rss`, so NetNewsWire itself tells you when the bridge needs something. A hosted `export` includes it as **Feed Booster status**, at the top level of the OPML. Pass `--no-status-feed` to `export-opml` to leave it out.
+
+It is built from the bridge's own records on each request, the same way the health report is, and never fetches upstream. Items have stable identifiers, so each one shows up once:
+
+| Item | When it appears |
+| --- | --- |
+| Bandcamp feeds caught up on *date* | After each catch-up, listing any Bandcamp feed it didn't rebuild |
+| Time to catch up Bandcamp | When the last catch-up is more than 14 days old |
+| *N* generated feeds need attention | When a feed has failed three refreshes in a row, or has nothing to serve. A new item appears only when that set of feeds changes |
+
+When nothing needs you, the feed holds only the last catch-up. A failure that clears up within a day, and email sources that are merely quiet, stay in `bridge-health`.
+
+The catch-up date is the date most Bandcamp feeds share, not the newest one, so adding a single Bandcamp source and deploying doesn't pass for a catch-up.
+
+Adding the status feed to an existing setup takes one export. Run `./scripts/netnewswire_workflow.sh export` after deploying a bridge that serves it, then import the new OPML or run `repair-netnewswire`. `verify-netnewswire` reports the status feed as missing until you do.
 
 ### Seeds Come From Your Checkout
 
@@ -82,14 +104,25 @@ Deploys bundle `exports/generated` from the local checkout as seeds. A source th
 
 A source with both copies serves the cached one, unless the seed's `lastBuildDate` is later. Then the seed wins until the next refresh rewrites the cache. That is what lets a local refresh plus a redeploy update feeds whose refresh is off. Only generated Bandcamp feeds carry a `lastBuildDate` today; for every other source the cache always wins.
 
-Two ways to keep seeds from going quietly stale, not yet implemented:
+`catch-up` relies on this: it refreshes Bandcamp locally right before deploying, so those seeds start current. For other sources, an old seed matters only until the bridge's first refresh replaces it. Stopping the bundling of local files altogether, and seeding new sources from their first scheduled refresh, is a possible future change: it would trade a short "waiting for its scheduled refresh" window for never serving a months-old copy as if it were current. `bridge-health` shows how many sources are on seed copies, so that choice can be judged against real numbers.
 
-- Refresh locally before deploying (`refresh-bandcamp-local-feeds`, `refresh-generated-local-feeds`), so seeds start current.
-- Stop bundling local files, and seed new sources from their first scheduled refresh instead. This trades a short "waiting for its scheduled refresh" window for never serving a months-old copy as if it were current.
+## Catching Up Bandcamp
 
-`bridge-health` shows how many sources are on seed copies, so either choice can be judged against real numbers.
+Since October 2026 Bandcamp has answered every request from Modal with a bot check, a "Client Challenge" page, while the same requests from a home connection still get real pages. Assume other cloud hosts get the same. This tool never tries to get past the check. So with `RSS_BRIDGE_BANDCAMP_REFRESH=off` the bridge sends Bandcamp nothing, and Bandcamp feeds move only when you catch them up from your Mac:
 
-## Email Sources
+```bash
+./scripts/netnewswire_workflow.sh catch-up
+```
+
+`catch-up` rebuilds every Bandcamp feed on this Mac (`refresh-bandcamp-local-feeds`), then deploys, so each rebuilt feed replaces the bridge's older copy. Before refreshing anything, it checks that the deploy can run, because a large collection takes a while: about a second per source, plus one discography lookup each. It saves progress every 20 sources, so an interrupted run loses little. If Bandcamp answers your Mac with a bot check too, it stops and deploys nothing. A single source that fails doesn't stop the run; that feed keeps serving its last good copy.
+
+Every two weeks or so is plenty for new releases. The [status feed](#the-status-feed) tells you in NetNewsWire when a catch-up is due, and so does `bridge-health`. `./scripts/netnewswire_workflow.sh status` shows both views at once: how old the feeds on this Mac are, then the bridge's report. A feed that shows up in "missed by the last catch-up" run after run keeps failing. The catch-up output names it on a `FAILED` line, along with the kind of error.
+
+## Email Sources (Optional, Future)
+
+**Status: groundwork for a future feature, not usable yet.** The bridge's side is built and tested: the inbound route, sender checks, sanitizer, and feed. The piece that delivers mail to it is not included yet. That piece is a mail-host hook, such as a Cloudflare Email Worker. Without it, an email source cannot receive mail end to end. Neither the Mac-only nor the hosted setup needs any of this. With no secret set, the inbound route rejects every request, so deploying the bridge without configuring email is safe.
+
+Once the hook exists, you'll need a domain of your own on Cloudflare, Email Routing on a subdomain kept for feeds, and one secret. If you only want newsletters as feeds today, a hosted email-to-feed service such as [Kill the Newsletter](https://kill-the-newsletter.com/) does that with no setup. The rest of this section documents the design, for anyone building the hook.
 
 An email source turns a newsletter with no feed into one. Its mail goes to an address of its own, the bridge keeps a sanitized copy of each message, and the feed is served on the usual `/feeds/<token>/generated/<source-id>.rss` route, so NetNewsWire needs nothing new.
 

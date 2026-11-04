@@ -19,7 +19,7 @@ make test
 
 CI runs that suite on Python 3.9 and 3.13 on Linux and on Python 3.13 on macOS. `pyproject.toml` sets the floor at 3.9, so avoid syntax newer than that — a `match` statement or a PEP 604 `int | None` union evaluated at runtime will pass locally on a current Python and break the 3.9 job. Modules that annotate anything start with `from __future__ import annotations`, which defers annotations and keeps modern typing syntax legal on 3.9.
 
-Two things need more than Python. `scripts/verify_public_template.sh` uses [ripgrep](https://github.com/BurntSushi/ripgrep) (`rg`) for its privacy checks. The hosted bridge needs the `modal` extra, installed into its own virtual environment as [Hosted Bridge](docs/hosting.md) describes.
+Two things need more than Python. `scripts/verify_public_template.sh` uses Git plus `grep` and `find`, which ship with macOS and Linux, for its privacy checks. The hosted bridge needs the `modal` extra, installed into its own virtual environment as [Hosted Bridge](docs/hosting.md) describes. The tests that drive the bridge's routes run only there and skip elsewhere: `.venv-modal/bin/python -m unittest discover -s tests`.
 
 ## One surprising piece: how `batch-subscribe` dispatches
 

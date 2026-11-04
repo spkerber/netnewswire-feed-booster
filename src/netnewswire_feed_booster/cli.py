@@ -70,8 +70,20 @@ from .bridge_policy import (
     bandcamp_refresh_setting,
     refresh_route_plan,
 )
-from .hosted_bandcamp import BandcampBotCheck, bandcamp_fetch_url, bandcamp_items_for_source, sources_with_hosted_generated_feeds
+from .hosted_bandcamp import (
+    BandcampBotCheck,
+    bandcamp_discography_items_for_source,
+    bandcamp_fetch_url,
+    bandcamp_items_for_source,
+    fetch_bandcamp_release_url,
+    hosted_status_feed_url,
+    is_bandcamp_custom_domain_artist,
+    sources_with_hosted_generated_feeds,
+    uses_bandcamp_discography,
+)
+from .bridge_health import STATUS_FEED_TITLE
 from .hosted_bandcamp import render_bandcamp_source_rss
+from .local_feeds import DEFAULT_STALE_DAYS, format_local_feed_status, local_feed_group
 from .nts import parse_nts_show_html
 from .mixcloud import mixcloud_source
 from .opml import parse_opml, write_opml
@@ -200,6 +212,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=os.environ.get("RSS_FEED_TOKEN", os.environ.get("BANDCAMP_FEED_TOKEN", "")),
         help="Token path segment for hosted generated feed URLs. Defaults to RSS_FEED_TOKEN, then BANDCAMP_FEED_TOKEN.",
     )
+    export_parser.add_argument(
+        "--no-status-feed",
+        action="store_true",
+        help="Leave the bridge's own status feed out of a hosted export",
+    )
 
     list_parser = subparsers.add_parser("list", help="List sources")
     list_parser.add_argument("--profile", default=None)
@@ -313,11 +330,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     email_parser = subparsers.add_parser(
         "subscribe-email-source",
-        help="Add a newsletter that arrives by email: generate its private address and an empty feed",
+        help="Optional, in progress: add a newsletter that arrives by email (needs a mail hook not included yet)",
         description=(
-            "Add an email source: mail sent to its own address becomes items in a feed the hosted bridge serves. "
-            "The address is printed once and kept only in the private registry. Redeploy afterwards, because "
-            "the bridge reads the registry shipped with each deploy."
+            "Optional and in progress. Add an email source: mail sent to its own address becomes items in a feed "
+            "the hosted bridge serves. The bridge side is complete, but the mail-host hook that delivers mail to it "
+            "is not included yet, so mail cannot arrive end to end. The address is printed once and kept only in "
+            "the private registry. Redeploy afterwards, because the bridge reads the registry shipped with each deploy."
         ),
     )
     email_parser.add_argument("--title", required=True)
@@ -386,6 +404,11 @@ def build_parser() -> argparse.ArgumentParser:
     bandcamp_following_parser.add_argument("--profile", default=DEFAULT_PROFILE)
     bandcamp_following_parser.add_argument("--group", default="")
     bandcamp_following_parser.add_argument("--out-dir", type=Path, default=Path("exports/generated"))
+    bandcamp_following_parser.add_argument(
+        "--band-ids-only",
+        action="store_true",
+        help="Only record Bandcamp band ids on artists and labels already in the registry; add and change nothing else",
+    )
 
     bandcamp_source_parser = subparsers.add_parser("subscribe-bandcamp-source", help="Add or reactivate a Bandcamp artist/label or fan source and generate its local RSS")
     bandcamp_source_parser.add_argument("url")
@@ -554,6 +577,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Delay after each request, on top of the per-host caps",
     )
     health_parser.add_argument("--show-sensitive", action="store_true")
+
+    local_status_parser = subparsers.add_parser(
+        "local-feed-status",
+        help="Show how long ago the generated feeds on this Mac were rebuilt (read-only, no network)",
+    )
+    local_status_parser.add_argument("--profile", default=DEFAULT_PROFILE)
+    local_status_parser.add_argument("--out-dir", type=Path, default=Path("exports/generated"))
+    local_status_parser.add_argument(
+        "--stale-days", type=float, default=DEFAULT_STALE_DAYS, help="Call a feed behind after this many days without a rebuild"
+    )
+    local_status_parser.add_argument("--list", action="store_true", help="Name every feed not rebuilt recently or not built yet")
 
     refresh_plan_parser = subparsers.add_parser(
         "refresh-plan",
@@ -878,6 +912,9 @@ def _apply_default_group(args: argparse.Namespace, argv: list[str]) -> None:
 
     if not hasattr(args, "group") or _option_was_supplied(argv, "--group"):
         return
+    if getattr(args, "band_ids_only", False):
+        # Nothing is filed: only band ids are recorded on existing sources.
+        return
 
     key = ADAPTER_KEY_BY_COMMAND.get(args.command) or ADAPTER_KEY_BY_KIND.get(getattr(args, "kind", ""))
     if key is None:
@@ -991,9 +1028,25 @@ def main(argv: Optional[list[str]] = None) -> int:
             if not args.bandcamp_feed_token:
                 parser.error("--bandcamp-feed-token is required when --bandcamp-feed-base is set")
             sources = sources_with_hosted_generated_feeds(sources, args.bandcamp_feed_base, token=args.bandcamp_feed_token)
+        exported = len(sources)
+        if args.bandcamp_feed_base and not args.no_status_feed:
+            # Not a registry source: the bridge builds it from its own health,
+            # so the reader can say when a catch-up is due.
+            sources = sources + [
+                Source(
+                    id="feed-booster-status",
+                    title=STATUS_FEED_TITLE,
+                    feed_url=hosted_status_feed_url(args.bandcamp_feed_base, args.bandcamp_feed_token),
+                    kind="other",
+                    profiles=[args.profile],
+                    source="bridge-status",
+                )
+            ]
         title = args.title or f"netnewswire-feed-booster: {args.profile}"
         write_opml(args.out, sources, title=title)
-        print(f"Exported {len(sources)} active sources.")
+        print(f"Exported {exported} active sources.")
+        if len(sources) > exported:
+            print(f'Included the bridge\'s "{STATUS_FEED_TITLE}" feed; pass --no-status-feed to leave it out.')
         return 0
 
     if args.command == "list":
@@ -1369,38 +1422,57 @@ def main(argv: Optional[list[str]] = None) -> int:
         ]
         bandcamp_sources.sort(key=lambda indexed_source: (indexed_source[1].id not in full_fan_source_ids, indexed_source[0]))
 
+        def paced_release_url(band_id: int, release_key: str) -> str:
+            if args.pause_seconds > 0:
+                time.sleep(args.pause_seconds)
+            return fetch_bandcamp_release_url(band_id, release_key)
+
         processed = 0
         bot_checked = False
+        failed_without_band_id = 0
         for _, source in bandcamp_sources:
             if source.source == "bandcamp-generated-music-feed":
                 continue
 
             try:
                 try:
-                    html = fetch_text(
-                        bandcamp_fetch_url(source),
-                        allowed_hosts=BANDCAMP_ADAPTER.allowed_hosts_for(source),
-                        allowed_suffixes=BANDCAMP_ADAPTER.allowed_suffixes_for(source),
-                    )
-                    items = bandcamp_items_for_source(
-                        source,
-                        html,
-                        fan_max_items=args.fan_max_items,
-                        full_fan_source_ids=full_fan_source_ids,
-                        max_items=args.max_items,
-                        post_band_details=post_bandcamp_band_details,
-                    )
+                    out_path = args.out_dir / f"{source.id}.rss"
+                    from_discography = uses_bandcamp_discography(source)
+                    if from_discography:
+                        items = bandcamp_discography_items_for_source(
+                            source,
+                            previous_feed=out_path.read_text(encoding="utf-8") if out_path.exists() else "",
+                            max_items=args.max_items,
+                            fetch_release_url=paced_release_url,
+                        )
+                    else:
+                        html = fetch_text(
+                            bandcamp_fetch_url(source),
+                            allowed_hosts=BANDCAMP_ADAPTER.allowed_hosts_for(source),
+                            allowed_suffixes=BANDCAMP_ADAPTER.allowed_suffixes_for(source),
+                        )
+                        items = bandcamp_items_for_source(
+                            source,
+                            html,
+                            fan_max_items=args.fan_max_items,
+                            full_fan_source_ids=full_fan_source_ids,
+                            max_items=args.max_items,
+                            post_band_details=post_bandcamp_band_details,
+                        )
                     if not items:
                         failed += 1
                         detail = source.site_url if args.show_sensitive else "[details redacted; use --show-sensitive]"
                         print(f"FAILED\t{source.id}\tNo items found\t{detail}")
                         continue
 
-                    out_path = args.out_dir / f"{source.id}.rss"
                     write_bandcamp_collection_rss(out_path, profile_url=source.site_url, title=source.title, items=items)
                     source.feed_url = out_path.resolve().as_uri()
                     source.source = "bandcamp-local-generated"
-                    source.notes = "Generated local RSS feed from the saved Bandcamp source page because OpenRSS did not mirror this Bandcamp feed reliably."
+                    source.notes = (
+                        "Generated local RSS feed from this custom-domain storefront's Bandcamp discography, because its own pages can redirect in a loop."
+                        if from_discography
+                        else "Generated local RSS feed from the saved Bandcamp source page because OpenRSS did not mirror this Bandcamp feed reliably."
+                    )
                     updated += 1
                     print(f"UPDATED\t{source.id}\t{len(items)} items")
                 except BandcampBotCheck:
@@ -1411,6 +1483,8 @@ def main(argv: Optional[list[str]] = None) -> int:
                     break
                 except Exception as error:
                     failed += 1
+                    if is_bandcamp_custom_domain_artist(source) and source.bandcamp_band_id is None:
+                        failed_without_band_id += 1
                     detail = (
                         f"{type(error).__name__}: {error}\t{source.site_url}"
                         if args.show_sensitive
@@ -1430,6 +1504,12 @@ def main(argv: Optional[list[str]] = None) -> int:
         store.save()
         print(f"Updated local Bandcamp feeds: {updated}")
         print(f"Failed local Bandcamp feeds: {failed}")
+        if failed_without_band_id:
+            print(
+                f"{failed_without_band_id} of them are custom-domain storefronts with no Bandcamp band id, "
+                "so they were read from their own pages, which can redirect in a loop. To read them from "
+                "bandcamp.com instead, record their ids with: import-bandcamp-following <your fan page URL> --band-ids-only"
+            )
         if bot_checked:
             print("Stopped early: Bandcamp is answering this network with a bot check. Sources not reached keep their current feeds.")
             return 1
@@ -1486,6 +1566,16 @@ def main(argv: Optional[list[str]] = None) -> int:
         store.save()
         print(f"Updated local generated feeds: {updated}")
         print(f"Failed local generated feeds: {failed}")
+        return 0
+
+    if args.command == "import-bandcamp-following" and args.band_ids_only:
+        sources = import_bandcamp_following(
+            args.url, profile=args.profile, group=args.group, out_dir=args.out_dir, include_fans=False
+        )
+        recorded = store.record_bandcamp_band_ids(sources)
+        if recorded:
+            store.save()
+        print(f"Recorded Bandcamp band ids on {recorded} sources already in the registry. Nothing was added.")
         return 0
 
     if args.command == "import-bandcamp-following":
@@ -1737,6 +1827,24 @@ def main(argv: Optional[list[str]] = None) -> int:
             print(f"Wrote {args.report}")
         return 1 if any(health.is_problem for health in results) else 0
 
+    if args.command == "local-feed-status":
+        if args.stale_days <= 0:
+            parser.error("--stale-days must be positive")
+        bandcamp_ids, other_ids = [], []
+        for source in store.active_sources(args.profile):
+            adapter = adapter_for_source(source)
+            if adapter is None or not adapter.fetches_upstream:
+                # Direct feeds have no local file, and email feeds are built by the bridge.
+                continue
+            (bandcamp_ids if adapter is BANDCAMP_ADAPTER else other_ids).append(source.id)
+        now = time.time()
+        groups = [
+            local_feed_group("bandcamp", bandcamp_ids, args.out_dir, now, args.stale_days),
+            local_feed_group("other", other_ids, args.out_dir, now, args.stale_days),
+        ]
+        print(format_local_feed_status(groups, args.out_dir, args.profile, now, args.stale_days, list_sources=args.list), end="")
+        return 0
+
     if args.command == "refresh-plan":
         try:
             bandcamp_refresh = bandcamp_refresh_setting(args.bandcamp_refresh)
@@ -1771,7 +1879,10 @@ def main(argv: Optional[list[str]] = None) -> int:
         has_capacity_gap = False
         for route in ("bandcamp", "generated"):
             if route == "bandcamp" and bandcamp_refresh == "off":
-                print(f"bandcamp: {route_counts[route]} sources; refresh off, serving the last cached or deploy-time copy")
+                print(
+                    f"bandcamp: {route_counts[route]} sources; refresh off, serving the last cached or deploy-time copy "
+                    "until ./scripts/netnewswire_workflow.sh catch-up rebuilds them"
+                )
                 continue
             plan = refresh_route_plan(
                 route,

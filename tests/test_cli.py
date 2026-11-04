@@ -5,6 +5,7 @@ import os
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import patch
+from urllib.error import HTTPError
 
 import isolated_env  # Clears private profile settings; keep above package imports.
 from netnewswire_feed_booster.cli import build_parser, main, normalize_legacy_webpage_command
@@ -1635,6 +1636,164 @@ class CliTests(unittest.TestCase):
         self.assertIn("Stopped early: Bandcamp is answering this network with a bot check.", rendered)
         for index in range(1, 4):
             self.assertEqual(refreshed.source_by_id(f"bandcamp-fixture-{index}").feed_url, f"file:///old/bandcamp-fixture-{index}.rss")
+
+    def _custom_domain_bandcamp_store(self, tmp_dir: str, band_id=4242) -> Path:
+        data_path = Path(tmp_dir) / "sources.json"
+        store = FeedStore(data_path)
+        store.add_or_update(
+            Source(
+                id="bandcamp-fixture-storefront",
+                title="Bandcamp: Fixture Storefront",
+                feed_url="file:///old/bandcamp-fixture-storefront.rss",
+                site_url="https://music.example.com",
+                kind="bandcamp",
+                profiles=["test-user"],
+                groups=["Bandcamp"],
+                bandcamp_band_id=band_id,
+            )
+        )
+        store.save()
+        return data_path
+
+    def _refresh_bandcamp(self, data_path: Path, out_dir: Path) -> tuple:
+        with redirect_stdout(io.StringIO()) as output:
+            result = main(
+                [
+                    "--data",
+                    str(data_path),
+                    "refresh-bandcamp-local-feeds",
+                    "--profile",
+                    "test-user",
+                    "--out-dir",
+                    str(out_dir),
+                ]
+            )
+        return result, output.getvalue()
+
+    def test_refresh_bandcamp_local_feeds_reads_a_custom_domain_storefront_from_its_discography(self) -> None:
+        discography = (
+            '{"name": "Fixture Storefront", "discography": ['
+            '{"item_type": "album", "item_id": 11, "art_id": 101, "title": "Known Record", "release_date": "02 Mar 2024 00:00:00 GMT"},'
+            '{"item_type": "track", "item_id": 22, "art_id": 202, "title": "New Single", "release_date": "20 Oct 2026 00:00:00 GMT"}'
+            "]}"
+        )
+        old_feed = (
+            '<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>Bandcamp: Fixture Storefront</title>'
+            "<item><title> - Known Record</title><link>https://music.example.com/album/known-record</link>"
+            '<guid isPermaLink="true">https://music.example.com/album/known-record</guid>'
+            "<description>Album by . &lt;p&gt;&lt;img src=\"https://f4.bcbits.com/img/a101_10.jpg\" alt=\"\" /&gt;&lt;/p&gt;</description>"
+            "</item></channel></rss>"
+        )
+        with TemporaryDirectory() as tmp_dir:
+            data_path = self._custom_domain_bandcamp_store(tmp_dir)
+            out_dir = Path(tmp_dir) / "generated"
+            out_dir.mkdir()
+            (out_dir / "bandcamp-fixture-storefront.rss").write_text(old_feed, encoding="utf-8")
+
+            with patch("netnewswire_feed_booster.cli.fetch_text", side_effect=AssertionError("requested the storefront")):
+                with patch("netnewswire_feed_booster.hosted_bandcamp.fetch_text_post", return_value=discography) as post:
+                    with patch(
+                        "netnewswire_feed_booster.hosted_bandcamp.fetch_text",
+                        return_value='{"bandcamp_url": "https://music.example.com/track/new-single"}',
+                    ) as lookup:
+                        with patch("netnewswire_feed_booster.cli.time.sleep") as sleep_mock:
+                            result, rendered = self._refresh_bandcamp(data_path, out_dir)
+
+            rss = (out_dir / "bandcamp-fixture-storefront.rss").read_text(encoding="utf-8")
+            refreshed = FeedStore(data_path).source_by_id("bandcamp-fixture-storefront")
+
+        self.assertEqual(result, 0)
+        self.assertIn("UPDATED\tbandcamp-fixture-storefront\t2 items", rendered)
+        self.assertEqual(post.call_count, 1)
+        self.assertEqual(lookup.call_count, 1)
+        # One pause before the release lookup, one after the source.
+        self.assertEqual(sleep_mock.call_count, 2)
+        self.assertIn('<guid isPermaLink="true">https://music.example.com/album/known-record</guid>', rss)
+        self.assertIn('<guid isPermaLink="true">https://music.example.com/track/new-single</guid>', rss)
+        self.assertIn("<title>Fixture Storefront - Known Record</title>", rss)
+        self.assertEqual(refreshed.bandcamp_band_id, 4242)
+        self.assertIn("discography", refreshed.notes)
+
+    def test_refresh_bandcamp_local_feeds_stops_at_a_bot_check_from_the_discography_api(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            data_path = self._custom_domain_bandcamp_store(tmp_dir)
+            out_dir = Path(tmp_dir) / "generated"
+            bot_check = "<html><head><title>Client Challenge</title></head></html>"
+            with patch("netnewswire_feed_booster.hosted_bandcamp.fetch_text_post", return_value=bot_check):
+                with patch("netnewswire_feed_booster.cli.time.sleep"):
+                    result, rendered = self._refresh_bandcamp(data_path, out_dir)
+            wrote = (out_dir / "bandcamp-fixture-storefront.rss").exists()
+
+        self.assertEqual(result, 1)
+        self.assertIn("STOPPED\tbandcamp-fixture-storefront\tBandcamp served a bot check", rendered)
+        self.assertFalse(wrote)
+
+    def test_refresh_bandcamp_local_feeds_names_the_fix_for_a_looping_storefront_without_a_band_id(self) -> None:
+        loop = HTTPError("https://music.example.com/music", 301, "redirect error that would lead to an infinite loop", None, io.BytesIO())
+        self.addCleanup(loop.close)
+        with TemporaryDirectory() as tmp_dir:
+            data_path = self._custom_domain_bandcamp_store(tmp_dir, band_id=None)
+            out_dir = Path(tmp_dir) / "generated"
+            with patch("netnewswire_feed_booster.cli.fetch_text", side_effect=loop):
+                with patch("netnewswire_feed_booster.cli.time.sleep"):
+                    result, rendered = self._refresh_bandcamp(data_path, out_dir)
+
+        self.assertEqual(result, 0)
+        self.assertIn("FAILED\tbandcamp-fixture-storefront\tHTTPError", rendered)
+        self.assertIn("1 of them are custom-domain storefronts with no Bandcamp band id", rendered)
+        self.assertIn("import-bandcamp-following <your fan page URL> --band-ids-only", rendered)
+
+    def test_import_bandcamp_following_band_ids_only_records_ids_and_changes_nothing_else(self) -> None:
+        followed = [
+            Source(
+                id="bandcamp-fixture-storefront",
+                title="Bandcamp: Renamed Upstream",
+                feed_url="file:///new/bandcamp-fixture-storefront.rss",
+                site_url="https://music.example.com/",
+                kind="bandcamp",
+                profiles=["test-user"],
+                groups=["Elsewhere"],
+                notes="Queued from your Bandcamp following list",
+                bandcamp_band_id=4242,
+            ),
+            Source(
+                id="bandcamp-not-registered",
+                title="Bandcamp: Not Registered",
+                feed_url="file:///new/bandcamp-not-registered.rss",
+                site_url="https://not-registered.bandcamp.com",
+                kind="bandcamp",
+                profiles=["test-user"],
+                bandcamp_band_id=777,
+            ),
+        ]
+        with TemporaryDirectory() as tmp_dir:
+            data_path = self._custom_domain_bandcamp_store(tmp_dir, band_id=None)
+            before = FeedStore(data_path).source_by_id("bandcamp-fixture-storefront")
+            with patch("netnewswire_feed_booster.cli.import_bandcamp_following", return_value=followed) as importer:
+                with redirect_stdout(io.StringIO()) as output, redirect_stderr(io.StringIO()) as errors:
+                    result = main(
+                        [
+                            "--data",
+                            str(data_path),
+                            "import-bandcamp-following",
+                            "https://bandcamp.com/fixture-fan",
+                            "--profile",
+                            "test-user",
+                            "--band-ids-only",
+                        ]
+                    )
+            after_store = FeedStore(data_path)
+            after = after_store.source_by_id("bandcamp-fixture-storefront")
+            source_ids = [source.id for source in after_store.sources()]
+
+        self.assertEqual(result, 0)
+        self.assertFalse(importer.call_args.kwargs["include_fans"])
+        self.assertIn("Recorded Bandcamp band ids on 1 sources already in the registry. Nothing was added.", output.getvalue())
+        self.assertNotIn("No --group given", output.getvalue() + errors.getvalue())
+        self.assertEqual(after.bandcamp_band_id, 4242)
+        self.assertEqual(source_ids, ["bandcamp-fixture-storefront"])
+        for field_name in ("title", "feed_url", "site_url", "groups", "notes", "status", "source"):
+            self.assertEqual(getattr(after, field_name), getattr(before, field_name), field_name)
 
     def test_refresh_plan_leaves_out_bandcamp_when_its_refresh_is_off(self) -> None:
         with TemporaryDirectory() as tmp_dir:

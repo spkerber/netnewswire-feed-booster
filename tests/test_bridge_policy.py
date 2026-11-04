@@ -5,6 +5,7 @@ from netnewswire_feed_booster.bridge_policy import (
     FeedWaitingForRefresh,
     bandcamp_refresh_setting,
     due_sources,
+    last_build_timestamp,
     refresh_route_plan,
     require_cached_feed,
     served_copy,
@@ -104,6 +105,16 @@ class BridgePolicyTests(unittest.TestCase):
 
         overloaded = refresh_route_plan("bandcamp", 241, batch_size=20, schedule_hours=1, refresh_interval_hours=12)
         self.assertFalse(overloaded.meets_target)
+
+    def test_last_build_timestamp_reads_the_channel_date_from_a_feed_prefix(self) -> None:
+        rss = built_rss("Tue, 03 Nov 2026 12:00:00 +0000")
+
+        self.assertEqual(last_build_timestamp(rss), 1793707200.0)
+        prefix = rss[: rss.index("</lastBuildDate>") + len("</lastBuildDate>")]
+        self.assertEqual(last_build_timestamp(prefix), 1793707200.0)
+        self.assertIsNone(last_build_timestamp(built_rss()))
+        self.assertIsNone(last_build_timestamp(built_rss("not a date")))
+        self.assertIsNone(last_build_timestamp(""))
 
 
 if __name__ == "__main__":

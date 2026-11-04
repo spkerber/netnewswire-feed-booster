@@ -166,6 +166,22 @@ class EmailSourceCliTests(unittest.TestCase):
         outline = next(node for node in ET.parse(hosted).iter("outline") if node.get("title") == "Weekly Notes")
         self.assertEqual(outline.get("xmlUrl"), "https://bridge.example.com/feeds/fixture-token/generated/email-weekly-notes.rss")
 
+    def test_a_hosted_export_includes_the_bridge_status_feed(self) -> None:
+        self.subscribe()
+        hosted, without, local = self.root / "hosted.opml", self.root / "without.opml", self.root / "local.opml"
+        hosted_flags = ["--bandcamp-feed-base", "https://bridge.example.com", "--bandcamp-feed-token", "fixture-token"]
+
+        _code, stdout, _stderr = self.run_cli("export-opml", "--out", str(hosted), *hosted_flags)
+        self.run_cli("export-opml", "--out", str(without), *hosted_flags, "--no-status-feed")
+        self.run_cli("export-opml", "--out", str(local))
+
+        status = [node for node in ET.parse(hosted).iter("outline") if node.get("title") == "Feed Booster status"]
+        self.assertEqual([node.get("xmlUrl") for node in status], ["https://bridge.example.com/feeds/fixture-token/status.rss"])
+        self.assertIn("Exported 1 active sources.", stdout)
+        self.assertIn("--no-status-feed", stdout)
+        for path in (without, local):
+            self.assertNotIn("Feed Booster status", path.read_text(encoding="utf-8"))
+
     def test_list_shows_the_address_only_with_show_sensitive(self) -> None:
         _code, stdout, _stderr = self.subscribe()
         address = ADDRESS.findall(stdout)[0]

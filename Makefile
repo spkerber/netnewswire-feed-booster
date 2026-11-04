@@ -9,7 +9,7 @@ IMPORT_OPML ?= imports/netnewswire.opml
 EXPORT_OPML ?= exports/$(PROFILE)-netnewswire.opml
 CLI := PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m netnewswire_feed_booster --data $(DATA) --history $(HISTORY)
 
-.PHONY: help test starter-import list import export hosted-export modal-deploy publish-netnewswire unfollows history
+.PHONY: help test starter-import list import export refresh-local status hosted-export modal-deploy catch-up bridge-health publish-netnewswire unfollows history
 
 help:
 	$(CLI) --help
@@ -29,11 +29,23 @@ import:
 export:
 	$(CLI) export-opml --profile $(PROFILE) --out $(EXPORT_OPML)
 
+refresh-local:
+	./scripts/netnewswire_workflow.sh refresh-local
+
+status:
+	./scripts/netnewswire_workflow.sh status
+
 hosted-export:
 	./scripts/netnewswire_workflow.sh export
 
 modal-deploy:
 	./scripts/netnewswire_workflow.sh deploy-modal
+
+catch-up:
+	./scripts/netnewswire_workflow.sh catch-up
+
+bridge-health:
+	./scripts/netnewswire_workflow.sh bridge-health
 
 publish-netnewswire:
 	./scripts/netnewswire_workflow.sh all

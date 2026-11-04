@@ -1,8 +1,8 @@
-"""The /inbound/email route as deployed, through FastAPI's test client.
+"""The bridge's /inbound/email and status-feed routes as deployed, through FastAPI's test client.
 
-The checks themselves are tested in test_email_feeds.py. This covers the glue in
-modal_bandcamp_app.py, which only runs where modal and fastapi are installed
-(the optional .venv-modal), so elsewhere it skips:
+The logic behind them is tested in test_email_feeds.py and test_bridge_health.py.
+This covers the glue in modal_bandcamp_app.py, which only runs where modal and
+fastapi are installed (the optional .venv-modal), so elsewhere it skips:
 
     .venv-modal/bin/python -m unittest discover -s tests
 """
@@ -132,6 +132,15 @@ class InboundEmailRouteTests(unittest.TestCase):
         self.assertNotIn(ADDRESS, feed.text)
         health = self.client.get("/feeds/fixture-token/health").text
         self.assertRegex(health, r"email-weekly-notes\t\d{4}-\d{2}-\d{2}\n")
+
+    def test_the_status_feed_is_served_behind_the_token(self) -> None:
+        feed = self.client.get("/feeds/fixture-token/status.rss")
+        wrong = self.client.get("/feeds/wrong-token/status.rss")
+
+        self.assertEqual(feed.status_code, 200)
+        self.assertTrue(feed.headers["content-type"].startswith("application/rss+xml"))
+        self.assertIn("<title>Feed Booster status</title>", feed.text)
+        self.assertEqual(wrong.status_code, 404)
 
     def test_the_scheduled_refresh_never_fetches_an_email_source(self) -> None:
         with patch.object(self.app.time, "sleep"):

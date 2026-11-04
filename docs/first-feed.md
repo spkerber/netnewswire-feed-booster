@@ -85,6 +85,7 @@ OPML moves subscription lists and folders, not your old local read/unread histor
 | `bootstrap_profile.sh` refuses to overwrite a file | Stop. Pick a new profile name or inspect the existing private profile. Use `--force` only when intentionally discarding that profile. |
 | You imported into iCloud by mistake | Do not import again. Export a backup, verify the feed list, and clean up deliberately in NetNewsWire. |
 | A Bandcamp or Mixcloud source fails on another device | A local `file://` feed is checkout-specific. Read [Hosted Bridge](hosting.md) before deciding whether optional HTTPS hosting is justified. |
+| A Bandcamp or other generated feed stopped getting new items | Generated feeds change only when rebuilt. Run `./scripts/netnewswire_workflow.sh status` to see how old they are. Then run `refresh-local` on a Mac-only setup, or `catch-up` with the hosted bridge. |
 
 ## FAQ
 

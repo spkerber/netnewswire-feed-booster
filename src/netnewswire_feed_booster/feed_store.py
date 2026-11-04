@@ -125,6 +125,10 @@ class Source:
     source: str = "manual"
     # Email sources only. Every other source leaves it out of its record.
     email: Optional[EmailIntake] = None
+    # Bandcamp artists and labels only, when known: the numeric id Bandcamp's
+    # own APIs take. A custom-domain storefront is refreshed from its
+    # discography by this id, because its pages can redirect in a loop.
+    bandcamp_band_id: Optional[int] = None
 
     def to_dict(self) -> Dict[str, Any]:
         normalized_groups = normalize_groups_for_source(self)
@@ -145,6 +149,8 @@ class Source:
         }
         if self.email is not None:
             record["email"] = self.email.to_dict()
+        if self.bandcamp_band_id is not None:
+            record["bandcamp_band_id"] = self.bandcamp_band_id
         return record
 
     @classmethod
@@ -165,7 +171,18 @@ class Source:
             last_reviewed_at=data.get("last_reviewed_at"),
             source=data.get("source", "manual"),
             email=EmailIntake.from_dict(email) if isinstance(email, dict) else None,
+            bandcamp_band_id=valid_bandcamp_band_id(data.get("bandcamp_band_id")),
         )
+
+
+def valid_bandcamp_band_id(value: object) -> Optional[int]:
+    """Return a positive integer band id, or None for anything else."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    text = str(value or "").strip()
+    return int(text) if text.isdigit() and int(text) > 0 else None
 
 
 class FeedStore:
@@ -270,6 +287,7 @@ class FeedStore:
             existing.notes = source.notes or existing.notes
             existing.source = existing.source if existing.source != "manual" else source.source
             existing.email = source.email or existing.email
+            existing.bandcamp_band_id = source.bandcamp_band_id or existing.bandcamp_band_id
             changed_id = existing.id
         else:
             existing_ids = {item.id for item in sources}
@@ -314,6 +332,7 @@ class FeedStore:
                 existing.notes = source.notes or existing.notes
                 existing.source = existing.source if existing.source != "manual" else source.source
                 existing.email = source.email or existing.email
+                existing.bandcamp_band_id = source.bandcamp_band_id or existing.bandcamp_band_id
                 by_feed_url[existing.feed_url] = existing
                 if existing.kind in ACCOUNT_IDENTITY_KINDS:
                     updated_account_key = (existing.kind, canonical_url(existing.site_url))
@@ -330,6 +349,32 @@ class FeedStore:
 
         self.set_sources(sources)
         return added_or_updated
+
+    def record_bandcamp_band_ids(self, incoming_sources: Iterable[Source]) -> int:
+        """Copy band ids onto Bandcamp sources already here, adding and changing nothing else.
+
+        Only the same storefront counts as a match, never the same id: two
+        different artists can share a display name, and so a slug. Titles,
+        notes, folders, and statuses stay as they are. Returns how many sources
+        gained or changed an id.
+        """
+        from .feed_identity import canonical_url
+
+        band_ids = {
+            canonical_url(source.site_url): source.bandcamp_band_id
+            for source in incoming_sources
+            if source.kind == "bandcamp" and source.bandcamp_band_id is not None and canonical_url(source.site_url)
+        }
+        sources = self.sources()
+        recorded = 0
+        for source in sources:
+            band_id = band_ids.get(canonical_url(source.site_url)) if source.kind == "bandcamp" else None
+            if band_id is not None and source.bandcamp_band_id != band_id:
+                source.bandcamp_band_id = band_id
+                recorded += 1
+        if recorded:
+            self.set_sources(sources)
+        return recorded
 
     def set_status(self, source_id: str, status: str) -> Source:
         if status not in VALID_STATUSES:

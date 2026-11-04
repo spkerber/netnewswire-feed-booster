@@ -15,6 +15,9 @@ export RSS_PROFILE=me
 | Weekly or before a large import | Export an OPML backup if you are about to reorganize an account | Run `audit-sources` and export a candidate OPML |
 | Monthly, or when feeds seem quiet | Act on what it finds: unsubscribe only what is really gone | Run `check-feed-health --report tmp/feed-health.md` |
 | When a feed is noisy | Unsubscribe or move it in the reader after deciding intentionally | Run `unsubscribe` so it cannot return during reconciliation |
+| Every week or two, Mac only | Nothing: NetNewsWire rereads the rebuilt files | Run `./scripts/netnewswire_workflow.sh refresh-local` |
+| Every two weeks or so, hosted bridge | Nothing: the next reader refresh picks up the new copies | Run `./scripts/netnewswire_workflow.sh catch-up` when `bridge-health` says a catch-up is due |
+| When generated feeds seem quiet | Do not repeatedly refresh them in the reader | Run `./scripts/netnewswire_workflow.sh status` |
 | When a generated source changes | Do not repeatedly refresh it in the reader | Run `refresh-plan`; redeploy only after source or cadence changes |
 | Before sharing code | Keep OPML, profile JSON, and `.env` files out of Finder shares and Git | Run `./scripts/verify_public_template.sh` |
 
@@ -66,7 +69,7 @@ An empty feed is reported but never counted as a problem. A SoundCloud artist wh
 
 Requests run in parallel but are capped per host (3 at a time for YouTube, 2 for Substack, 4 for any other host) with a short pause after each, so a registry of a few thousand feeds takes about ten minutes. Each problem is retried once, after a 30-second pause and one request at a time per host.
 
-YouTube's feed endpoint returns 404s and 500s for live channels when it is busy, sometimes for a hundred or more channels in a single run. A YouTube feed that still fails on the retry is called gone only when its channel page says the channel was terminated, removed, or does not exist; otherwise it is reported as unavailable. Generated (`file://`) feeds are skipped, because the hosted bridge refreshes those. Like `audit-sources`, it contacts every publisher it checks, which shows them your IP address.
+YouTube's feed endpoint returns 404s and 500s for live channels when it is busy, sometimes for a hundred or more channels in a single run. A YouTube feed that still fails on the retry is called gone only when its channel page says the channel was terminated, removed, or does not exist; otherwise it is reported as unavailable. Generated (`file://`) feeds are skipped, because this tool builds them; [Keeping Generated Feeds Current](#keeping-generated-feeds-current) covers how to check those. Like `audit-sources`, it contacts every publisher it checks, which shows them your IP address.
 
 The summary prints only hosts, because feed URLs can carry private keys. `--show-sensitive` prints full URLs for local inspection. `--report` writes every list, including quiet and empty feeds, as Markdown. The report names your subscriptions, so keep it under `tmp/`, which Git ignores.
 
@@ -81,6 +84,37 @@ python3 -m netnewswire_feed_booster subscribe-webpage-feed https://hydefm.com/ar
 ```
 
 `subscribe-webpage-feed` accepts only pages with a registered, allowlisted recipe. HydeFM is the current reference recipe. The older `subscribe-hydefm-archive` command remains as a compatibility shortcut.
+
+### Keeping Generated Feeds Current
+
+A generated feed changes only when something rebuilds it. What does that depends on your [setup](../README.md#two-setups-for-generated-feeds).
+
+**Mac only.** Rebuild every generated feed from your own connection, every week or two or whenever you want new releases:
+
+```bash
+./scripts/netnewswire_workflow.sh refresh-local
+```
+
+It runs `refresh-bandcamp-local-feeds` and `refresh-generated-local-feeds`, then shows the status below. NetNewsWire rereads the files at its next refresh, so there is nothing to import again. Write the OPML to import once with `./scripts/netnewswire_workflow.sh export-local`, and again only after adding or removing sources.
+
+**Hosted bridge.** The bridge refreshes everything except Bandcamp on its own. Bandcamp blocks cloud hosts, so catch those feeds up from your Mac every two weeks or so:
+
+```bash
+./scripts/netnewswire_workflow.sh catch-up
+```
+
+It rebuilds the Bandcamp feeds here and deploys them. See [Catching Up Bandcamp](hosting.md#catching-up-bandcamp) for what it checks first and what happens when a source fails.
+
+With the hosted bridge you don't have to remember. The hosted export includes a **Feed Booster status** feed, so NetNewsWire tells you itself when a catch-up is due, confirms each one with a list of the feeds it missed, and flags any feed that stops working. See [The Status Feed](hosting.md#the-status-feed).
+
+**Checking on them.** `status` is read-only, makes no requests to any source, and works in either setup:
+
+```bash
+./scripts/netnewswire_workflow.sh status
+python3 -m netnewswire_feed_booster local-feed-status --profile "$RSS_PROFILE" --list
+```
+
+It reports, for Bandcamp and for every other generated feed, when most of the files on this Mac were last rebuilt (so one source added since doesn't pass for a full refresh), how many haven't been rebuilt in 14 days, and how many were never built. It tells you which command to run when they're behind. With a bridge configured, `status` then prints `bridge-health`, which says when a Bandcamp catch-up is due. `--list` names each feed not rebuilt recently. A Bandcamp feed that stays on that list after refreshes keeps failing; so does any feed on a Mac-only setup. With the hosted bridge, old local copies of the other feeds are expected, because the bridge refreshes them, not your Mac.
 
 After adding or removing a generated source on an already configured Modal host, redeploy the hosted bridge, then export hosted OPML:
 

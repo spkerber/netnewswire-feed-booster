@@ -162,9 +162,9 @@ Open the candidate OPML in NetNewsWire only after reviewing the agent's summary.
 
 ## Optional HTTPS Hosting
 
-Skip hosting if every feed is already HTTPS. You need hosting only for generated feeds that NetNewsWire cannot refresh from `file://`.
+Skip hosting if every feed is already HTTPS. You need hosting only for generated feeds read on more than one device. On one Mac, `file://` feeds rebuilt with `./scripts/netnewswire_workflow.sh refresh-local` are a complete setup.
 
-**Supported path today: Modal.** The included runtime, scheduled refresh, cache volume, and deployment script are tested for Modal. Railway, DigitalOcean, and Cloudflare are not turnkey deployment targets in this repository yet; use them only after adding and testing a provider-specific adapter.
+**Supported path today: Modal.** The included runtime, scheduled refresh, cache volume, and deployment script are tested for Modal. Bandcamp blocks Modal, so keep `RSS_BRIDGE_BANDCAMP_REFRESH=off` and catch Bandcamp feeds up from the Mac with `./scripts/netnewswire_workflow.sh catch-up`. That command deploys, so the agent must ask before running it, as for any deploy. Railway, DigitalOcean, and Cloudflare are not turnkey deployment targets in this repository yet; use them only after adding and testing a provider-specific adapter.
 
 For a fresh Modal setup:
 
