@@ -84,20 +84,14 @@ This is intentional: slower recovery is preferable to repeatedly hitting a sourc
 
 ### When Bandcamp Blocks The Host
 
-Bandcamp can answer a whole network with a bot check: a "Client Challenge" page, sent as HTTP 200, in place of every artist page and API response. Since about October 2026 it has answered every request from Modal this way, while the same requests from a home connection still get real pages, so assume other cloud hosts get it too. The bridge recognizes the page and reports it as `BandcampBotCheck` rather than as a page with no releases. A refresh run stops at the first one, and so does `refresh-bandcamp-local-feeds`, which then exits with status 1, because every further request would get the same answer.
+Since about October 2026, Bandcamp has answered every request from Modal with a bot check: a "Client Challenge" page, sent as HTTP 200, in place of every page and API response. A home connection still gets real pages; assume other cloud hosts get the check too. The tool recognizes the page and reports `BandcampBotCheck`. A run stops at the first one, because every further request would get the same answer, and `refresh-bandcamp-local-feeds` then exits with status 1.
 
-Never try to get past the check. Turn the bridge's Bandcamp refresh off instead, in ignored `data/private.env`, and redeploy. The example file already sets it off, because Modal is the bundled host:
+Never try to get past the check. Keep the bridge's Bandcamp refresh off in ignored `data/private.env`, as the example file already sets it:
 
 ```dotenv
 RSS_BRIDGE_BANDCAMP_REFRESH=off
 ```
 
-With the refresh off, the bridge sends Bandcamp nothing. Bandcamp feeds serve their last cached or deploy-time copy, and `refresh-plan` leaves them out of its capacity check. `bridge-health` lists them as "refresh off" rather than failing or stale, with the date of the last catch-up, and says when the next one is due. To catch them up, run this from a network Bandcamp still answers, such as your home connection:
+With the refresh off, the bridge sends Bandcamp nothing, `refresh-plan` leaves Bandcamp out of its capacity check, and `bridge-health` lists those feeds as "refresh off" with the date of the last catch-up. They update when you run `catch-up` from your Mac; see [Catching Up Bandcamp](hosting.md#catching-up-bandcamp).
 
-```bash
-./scripts/netnewswire_workflow.sh catch-up
-```
-
-It rebuilds the Bandcamp feeds on your Mac, then deploys. A seed built after the cached copy is served in its place (see [Seeds Come From Your Checkout](hosting.md#seeds-come-from-your-checkout)). Every two weeks or so suits slow reading. See [Catching Up Bandcamp](hosting.md#catching-up-bandcamp) for the details.
-
-If your host is one Bandcamp still answers, set the refresh back to `on`. The bridge then refreshes Bandcamp on the same schedule as everything else, and stops at the first bot check if that ever changes.
+If your host is one Bandcamp still answers, set the refresh back to `on`. The bridge then refreshes Bandcamp on the usual schedule, and stops at the first bot check if that changes.
