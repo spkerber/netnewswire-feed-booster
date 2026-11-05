@@ -147,7 +147,7 @@ Every command above is a mode of `./scripts/netnewswire_workflow.sh`. Run `./scr
 
 **Hosted bridge.** The same feed-building logic runs on a small cloud service (this project uses Modal) and serves each generated feed at a normal `https://` URL any device can reach. It refreshes NTS, Mixcloud, and webpage-recipe feeds on a schedule. Bandcamp is the exception: since October 2026 it answers every request from Modal with a bot check, and this tool never tries to get past one. So the bridge leaves Bandcamp alone, and `catch-up` rebuilds those feeds on your Mac and deploys them. Every two weeks or so is plenty, and you don't have to remember: the hosted export adds a **Feed Booster status** feed, so NetNewsWire itself tells you when a catch-up is due. It also lists any Bandcamp feed the last catch-up couldn't rebuild, and flags any generated feed that stops working.
 
-**Email intake (optional, future).** Some newsletters have no RSS at all. Groundwork for turning their emails into feeds served by the bridge is in place, but the piece that delivers mail to it is not, so it can't be used yet. Neither setup above needs it. Until it lands, a hosted email-to-feed service such as [Kill the Newsletter](https://kill-the-newsletter.com/) does this with no setup. See [Email Sources](docs/hosting.md#email-sources-optional-future).
+**Email intake (optional, future).** Some newsletters have no RSS at all. Groundwork for turning their emails into feeds served by the bridge is in place, but the piece that delivers mail to it is not, so it can't be used yet. Neither setup above needs it. Until it lands, a hosted email-to-feed service such as [Kill the Newsletter](https://kill-the-newsletter.com/) does this with no setup. See [Email Sources](docs/email-sources.md).
 
 See [Source Types](docs/source-types.md) for which platforms fall into each category, [Operations](docs/operations.md) for the routine in each setup, and [Hosted Bridge](docs/hosting.md) if you want the cloud option.
 
@@ -189,7 +189,8 @@ See [Public Release](docs/public-release.md) for the full release checklist.
 - [Slow Reading And Refresh Policy](docs/reading-practice.md): cadence, capacity, storage, and tuning tradeoffs.
 - [Writing A Source Adapter](docs/writing-a-source-adapter.md): security and testing contract for a new generated source type.
 - [Writing A Direct Feed Source](docs/writing-a-direct-feed-source.md): the equivalent contract for a source with its own native feed URL — YouTube, SoundCloud, Substack, Podcasts.
-- [Hosted Bridge](docs/hosting.md): tokenized generated feeds, supported host options, Bandcamp catch-up, and the optional email intake planned for later.
+- [Hosted Bridge](docs/hosting.md): tokenized generated feeds, supported host options, and Bandcamp catch-up.
+- [Email Sources](docs/email-sources.md): the design for turning newsletters into feeds, planned and not usable yet.
 - [Contributing](CONTRIBUTING.md): scope and privacy requirements for contributors, and how `batch-subscribe` dispatches.
 - [Changelog](CHANGELOG.md): what changed in each release, including upgrade notes.
 

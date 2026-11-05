@@ -516,11 +516,11 @@ class SecretAndPrivacyPlacementTests(unittest.TestCase):
         self.assertRegex(example, r"(?m)^RSS_INBOUND_EMAIL_SECRET=$")
         self.assertRegex(example, r"(?m)^RSS_INBOUND_EMAIL_ADDRESS=\S+@feeds\.example\.com$")
 
-    def test_the_hosting_guide_says_how_to_rotate_the_inbound_secret(self) -> None:
-        hosting = (REPO_ROOT / "docs" / "hosting.md").read_text(encoding="utf-8")
+    def test_the_email_sources_guide_says_how_to_rotate_the_inbound_secret(self) -> None:
+        guide = (REPO_ROOT / "docs" / "email-sources.md").read_text(encoding="utf-8")
 
-        self.assertIn("### Rotating the Inbound Secret", hosting)
-        self.assertIn("RSS_INBOUND_EMAIL_SECRET", hosting)
+        self.assertIn("## Rotating the Inbound Secret", guide)
+        self.assertIn("RSS_INBOUND_EMAIL_SECRET", guide)
 
     def test_tracked_files_hold_no_real_email_address(self) -> None:
         try:

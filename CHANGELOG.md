@@ -34,6 +34,7 @@ Notable changes per release. The [GitHub releases](https://github.com/spkerber/n
 
 ### Changed
 
+- The email-source design moved from the hosting guide to its own page, `docs/email-sources.md`, so the hosting guide covers only what works today. The Bandcamp bot-check explanation in the refresh policy is shorter and points to the catch-up section.
 - `examples/private.env.example` now sets `RSS_BRIDGE_BANDCAMP_REFRESH=off`, because Bandcamp answers Modal, the bundled host, with a bot check. A new bridge copied from the example sends Bandcamp nothing and relies on `catch-up` instead. The code default is still on, for a host Bandcamp still answers, and an existing `data/private.env` is unchanged.
 - The README no longer says the hosted bridge refreshes every generated feed on its own: it refreshes everything except Bandcamp on a blocked host. `refresh-plan` now names `catch-up` beside the Bandcamp sources it leaves out.
 - A deploy's seed copy now replaces an older cached copy. The bridge used to serve any cached copy over the seed, so with Bandcamp refresh off, refreshing locally and redeploying could not reach a source that already had a cached copy, which in one profile was 389 of its Bandcamp sources. The seed now wins when its `lastBuildDate` is later than the cache's. Only generated Bandcamp feeds carry one, so every other source serves its cache as before.
