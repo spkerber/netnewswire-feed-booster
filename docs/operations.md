@@ -148,6 +148,8 @@ python3 -m netnewswire_feed_booster list-history --profile "$RSS_PROFILE"
 python3 -m netnewswire_feed_booster unfollow-checklist --profile "$RSS_PROFILE"
 ```
 
+Reconcile works from a NetNewsWire export in either setup. In a hosted setup it matches each bridge URL, `/feeds/<token>/generated/<id>.rss`, to the registry source with that ID, without needing the token, and it skips the bridge's status feed.
+
 `subscription-history` records intentional RSS removals so stale feeds cannot silently reappear and any upstream unfollow work remains visible.
 
 For the iCloud subscription file, verify before repairing:
