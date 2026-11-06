@@ -2,7 +2,7 @@ import io
 import socket
 import unittest
 import urllib.request
-from http.client import HTTPMessage
+from http.client import HTTPMessage, RemoteDisconnected
 from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlparse
@@ -209,6 +209,26 @@ class DiscographyItemsTests(unittest.TestCase):
         for link, _art_id in old_links:
             self.assertIn(f'<guid isPermaLink="true">{link}</guid>', rss)
         self.assertIn("<title>Fixture Artist - Middle Record</title>", rss)
+
+    def test_a_dropped_lookup_keeps_the_links_it_has_and_ends_the_lookups(self) -> None:
+        known = bandcamp_release_urls_by_artwork(previous_feed((f"https://{CUSTOM_DOMAIN}/album/older-record", 101)))
+        lookups = []
+
+        def lookup(release_key: str) -> str:
+            lookups.append(release_key)
+            raise RemoteDisconnected("Remote end closed connection without response")
+
+        items = bandcamp_discography_items(DISCOGRAPHY, f"https://{CUSTOM_DOMAIN}", known_urls=known, lookup_release_url=lookup)
+
+        self.assertEqual(lookups, ["track-22"])
+        self.assertEqual([item.url for item in items], [f"https://{CUSTOM_DOMAIN}/album/older-record"])
+
+    def test_a_bot_check_during_a_lookup_still_stops_the_run(self) -> None:
+        def lookup(release_key: str) -> str:
+            raise BandcampBotCheck("Bandcamp served a bot check")
+
+        with self.assertRaises(BandcampBotCheck):
+            bandcamp_discography_items(DISCOGRAPHY, f"https://{CUSTOM_DOMAIN}", known_urls={}, lookup_release_url=lookup)
 
     def test_lookups_stop_at_the_budget_and_unlinked_releases_wait_for_a_later_refresh(self) -> None:
         lookups = []

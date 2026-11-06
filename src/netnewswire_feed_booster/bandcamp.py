@@ -332,8 +332,9 @@ def bandcamp_discography_items(
     The discography has each release's title, artist, date, and artwork, but
     not its page URL. A release the previous feed already linked keeps that
     link (`known_urls`, by artwork id), so a reader doesn't take it for new.
-    The rest are looked up newest first, at most `max_lookups` per refresh; a
-    release still without a URL is left out until a later refresh reaches it.
+    The rest are looked up newest first, at most `max_lookups` per refresh, and
+    a dropped connection ends the lookups for this refresh. A release still
+    without a URL is left out until a later refresh reaches it.
     Every URL must be an album or track page on the storefront's own host or
     on bandcamp.com.
     """
@@ -378,7 +379,13 @@ def bandcamp_discography_items(
             if lookups >= max_lookups:
                 continue
             lookups += 1
-            url = _bandcamp_release_url(lookup_release_url(item.release_key), site_url)
+            try:
+                url = _bandcamp_release_url(lookup_release_url(item.release_key), site_url)
+            except OSError:
+                # Bandcamp drops connections when lookups come too quickly. Keep
+                # this refresh's links, so the next refresh starts further along.
+                lookups = max_lookups
+                continue
         if not url or url in used_urls:
             continue
         used_urls.add(url)
