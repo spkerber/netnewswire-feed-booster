@@ -100,7 +100,7 @@ Adding the status feed to an existing setup takes one export. Run `./scripts/net
 
 ### Seeds Come From Your Checkout
 
-Deploys bundle `exports/generated` from the local checkout as seeds. A source the bridge has never refreshed serves that copy, which is only as fresh as your last local refresh. A source with no local file has nothing to serve until its first scheduled refresh.
+Deploys bundle `exports/generated` from the local checkout as seeds. `deploy-modal` also writes `seed-build-times.json` there, the build date of every seed, so the health report and status feed read one file instead of opening each seed. Deploy through the workflow script, or a report can show older dates. A source the bridge has never refreshed serves that copy, which is only as fresh as your last local refresh. A source with no local file has nothing to serve until its first scheduled refresh.
 
 A source with both copies serves the cached one, unless the seed's `lastBuildDate` is later. Then the seed wins until the next refresh rewrites the cache. That is what lets a local refresh plus a redeploy update feeds whose refresh is off. Only generated Bandcamp feeds carry a `lastBuildDate` today; for every other source the cache always wins.
 

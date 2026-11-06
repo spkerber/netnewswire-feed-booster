@@ -5,6 +5,7 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import timezone
 from math import ceil
+from pathlib import Path
 from typing import Callable, Iterable, Optional, TypeVar
 
 from .rss_safety import parse_internet_date
@@ -18,6 +19,7 @@ DEFAULT_MAX_REFRESH_SOURCES_PER_RUN = 20
 MAX_SAFE_REFRESH_SOURCES_PER_RUN = 25
 DEFAULT_MAX_RSS_ITEMS_PER_SOURCE = 50
 BANDCAMP_REFRESH_SETTING = "RSS_BRIDGE_BANDCAMP_REFRESH"
+SEED_BUILD_TIMES_FILE = "seed-build-times.json"
 _LAST_BUILD_DATE = re.compile(r"<lastBuildDate>\s*([^<]+?)\s*</lastBuildDate>")
 
 
@@ -55,6 +57,17 @@ def served_copy(cached: Optional[str], seeded: Optional[str]) -> Optional[str]:
     if cached_built is not None and seeded_built is not None and seeded_built > cached_built:
         return seeded
     return cached
+
+
+def seed_build_times(seed_dir: Path) -> dict[str, float]:
+    """Each generated feed's build date, by source ID, for one file the deploy ships."""
+    times: dict[str, float] = {}
+    for path in sorted(seed_dir.glob("*.rss")):
+        with path.open(encoding="utf-8", errors="replace") as handle:
+            built = last_build_timestamp(handle.read(4096))
+        if built is not None:
+            times[path.stem] = built
+    return times
 
 
 def last_build_timestamp(rss_head: str) -> Optional[float]:

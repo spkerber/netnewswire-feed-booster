@@ -8,6 +8,7 @@ fastapi are installed (the optional .venv-modal), so elsewhere it skips:
 """
 
 import importlib.util
+import json
 import os
 import tempfile
 import unittest
@@ -141,6 +142,60 @@ class InboundEmailRouteTests(unittest.TestCase):
         self.assertTrue(feed.headers["content-type"].startswith("application/rss+xml"))
         self.assertIn("<title>Feed Booster status</title>", feed.text)
         self.assertEqual(wrong.status_code, 404)
+
+    def bandcamp_sources(self):
+        return [
+            Source(id=f"bandcamp-{name}", title=name, feed_url="file:///tmp/x.rss", site_url=f"https://{name}.bandcamp.com", kind="bandcamp")
+            for name in ("seeded", "cached")
+        ]
+
+    def test_the_health_report_dates_refresh_off_feeds_without_opening_one_per_feed(self) -> None:
+        seeds, cache = self.root / "seed", self.root / "cache" / "generated"
+        state = self.root / "cache" / "refresh-state"
+        for folder in (seeds, cache, state):
+            folder.mkdir(parents=True)
+        (seeds / "seed-build-times.json").write_text(json.dumps({"bandcamp-seeded": 2000.0, "bandcamp-cached": 500.0}), encoding="utf-8")
+        (seeds / "bandcamp-seeded.rss").write_text("seed", encoding="utf-8")
+        (cache / "bandcamp-cached.rss").write_text("cache", encoding="utf-8")
+        os.utime(cache / "bandcamp-cached.rss", (1000.0, 1000.0))
+        (state / "bandcamp-seeded.json").write_text("{}", encoding="utf-8")
+
+        with patch.object(self.app, "BANDCAMP_REFRESH", "off"), patch.object(
+            self.app, "_active_sources_for_route", return_value=self.bandcamp_sources()
+        ), patch.object(self.app, "_build_time", side_effect=AssertionError("opened a feed")), patch(
+            "netnewswire_feed_booster.bridge_health.parse_refresh_state", side_effect=AssertionError("read refresh state")
+        ):
+            health = self.app._bridge_health()
+
+        self.assertEqual(sorted(health.refresh_off), ["bandcamp-cached", "bandcamp-seeded"])
+        self.assertEqual(health.last_catch_up, 2000.0)
+
+    def test_a_cached_copy_newer_than_its_seed_dates_the_feed_by_its_file_time(self) -> None:
+        seeds, cache = self.root / "seed", self.root / "cache" / "generated"
+        for folder in (seeds, cache):
+            folder.mkdir(parents=True)
+        (seeds / "seed-build-times.json").write_text(json.dumps({"bandcamp-cached": 500.0}), encoding="utf-8")
+        (cache / "bandcamp-cached.rss").write_text("cache", encoding="utf-8")
+        os.utime(cache / "bandcamp-cached.rss", (1000.0, 1000.0))
+
+        with patch.object(self.app, "BANDCAMP_REFRESH", "off"), patch.object(
+            self.app, "_active_sources_for_route", return_value=self.bandcamp_sources()[1:]
+        ):
+            health = self.app._bridge_health()
+
+        self.assertEqual(health.last_catch_up, 1000.0)
+
+    def test_a_seed_missing_from_the_shipped_file_is_read_directly(self) -> None:
+        seeds = self.root / "seed"
+        seeds.mkdir(parents=True)
+        (seeds / "bandcamp-seeded.rss").write_text("<rss><lastBuildDate>Sun, 01 Nov 2026 12:00:00 +0000</lastBuildDate></rss>", encoding="utf-8")
+
+        with patch.object(self.app, "BANDCAMP_REFRESH", "off"), patch.object(
+            self.app, "_active_sources_for_route", return_value=self.bandcamp_sources()[:1]
+        ):
+            health = self.app._bridge_health()
+
+        self.assertEqual(health.last_catch_up, 1793534400.0)
 
     def test_the_scheduled_refresh_never_fetches_an_email_source(self) -> None:
         with patch.object(self.app.time, "sleep"):
