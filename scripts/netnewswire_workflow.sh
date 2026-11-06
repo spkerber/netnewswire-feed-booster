@@ -104,6 +104,11 @@ deploy_modal() {
   require_private_profile
   require_modal_deploy
   export RSS_PROFILE RSS_SOURCES_FILE RSS_FEED_TOKEN MODAL_APP_NAME MODAL_SECRET_NAME MODAL_VOLUME_NAME FULL_FAN_SOURCE_IDS BANDCAMP_CUSTOM_DOMAINS
+  # Ships with the seeds, so the bridge's health report needn't open every one.
+  PYTHONPATH=src python3 -m netnewswire_feed_booster \
+    --data "${RSS_SOURCES_FILE}" \
+    --history "${RSS_HISTORY_FILE}" \
+    write-seed-build-times
   "${MODAL_BIN}" secret create "${MODAL_SECRET_NAME}" --from-dotenv "${PRIVATE_ENV_FILE}" --force
   "${MODAL_BIN}" deploy modal_bandcamp_app.py
 }

@@ -346,18 +346,26 @@ def _bridge_health():
         else set()
     )
     email_ids = {source.id for source in sources if adapter_for_source(source) is EMAIL_ADAPTER}
+    # A cold container pays for each file it opens, and thousands of them can run
+    # past the web function's timeout. So nothing here opens a file per Bandcamp
+    # feed: the report never uses a refresh-off source's state.
+    reported_by_state = source_ids - refresh_off
     states = {}
     if REFRESH_STATE_DIR.exists():
         for path in REFRESH_STATE_DIR.glob("*.json"):
-            if path.stem in source_ids:
+            if path.stem in reported_by_state:
                 states[path.stem] = parse_refresh_state(path.read_text(encoding="utf-8"))
     cached = {path.stem: path.stat().st_mtime for path in CACHE_DIR.glob("*.rss")} if CACHE_DIR.exists() else {}
     seeded = {path.stem for path in SEED_DIR.glob("*.rss")} if SEED_DIR.exists() else set()
     # A refresh-off feed moves only when a catch-up redeploys it, so report how
     # old the copy it serves is: the newer of the cached and deploy-time builds.
+    # A refresh writes a cached file and stamps its build date together, so the
+    # file's time stands in for that date.
+    seed_times = _seed_build_times()
     built = {}
     for source_id in refresh_off:
-        times = [stamp for stamp in (_build_time(_cache_path(source_id)), _build_time(_seed_path(source_id))) if stamp is not None]
+        seed_time = seed_times[source_id] if source_id in seed_times else _build_time(_seed_path(source_id))
+        times = [stamp for stamp in (cached.get(source_id), seed_time) if stamp is not None]
         if times:
             built[source_id] = max(times)
     return summarize_bridge_health(
@@ -383,6 +391,16 @@ def _status_feed_rss() -> str:
     from netnewswire_feed_booster.bridge_health import render_status_feed
 
     return render_status_feed(_bridge_health())
+
+
+def _seed_build_times() -> dict:
+    """Seeds' build dates from the one file a deploy ships, or nothing without it."""
+    from netnewswire_feed_booster.bridge_policy import SEED_BUILD_TIMES_FILE
+
+    try:
+        return json.loads((SEED_DIR / SEED_BUILD_TIMES_FILE).read_text(encoding="utf-8"))
+    except (FileNotFoundError, ValueError):
+        return {}
 
 
 def _build_time(path: Path) -> Optional[float]:

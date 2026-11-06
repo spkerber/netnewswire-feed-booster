@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import io
+import json
 import os
 import sys
 import time
@@ -70,6 +71,8 @@ from .generated_adapters import (
     hosted_route_for_source,
 )
 from .bridge_policy import (
+    SEED_BUILD_TIMES_FILE,
+    seed_build_times,
     BANDCAMP_REFRESH_SETTING,
     DEFAULT_MAX_REFRESH_SOURCES_PER_RUN,
     DEFAULT_REFRESH_INTERVAL_SECONDS,
@@ -598,6 +601,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--stale-days", type=float, default=DEFAULT_STALE_DAYS, help="Call a feed behind after this many days without a rebuild"
     )
     local_status_parser.add_argument("--list", action="store_true", help="Name every feed not rebuilt recently or not built yet")
+
+    seed_times_parser = subparsers.add_parser(
+        "write-seed-build-times",
+        help="Record every generated feed's build date in one file, which a deploy ships for the bridge's health report",
+    )
+    seed_times_parser.add_argument("--out-dir", type=Path, default=Path("exports/generated"))
 
     refresh_plan_parser = subparsers.add_parser(
         "refresh-plan",
@@ -1850,6 +1859,12 @@ def main(argv: Optional[list[str]] = None) -> int:
             write_report(results, args.report, skipped_generated=skipped_generated, show_sensitive=args.show_sensitive)
             print(f"Wrote {args.report}")
         return 1 if any(health.is_problem for health in results) else 0
+
+    if args.command == "write-seed-build-times":
+        times = seed_build_times(args.out_dir)
+        (args.out_dir / SEED_BUILD_TIMES_FILE).write_text(json.dumps(times, sort_keys=True) + "\n", encoding="utf-8")
+        print(f"Recorded the build dates of {len(times)} generated feeds.")
+        return 0
 
     if args.command == "local-feed-status":
         if args.stale_days <= 0:

@@ -1,4 +1,6 @@
+import tempfile
 import unittest
+from pathlib import Path
 
 import isolated_env  # Clears private profile settings; keep above package imports.
 from netnewswire_feed_booster.bridge_policy import (
@@ -8,6 +10,7 @@ from netnewswire_feed_booster.bridge_policy import (
     last_build_timestamp,
     refresh_route_plan,
     require_cached_feed,
+    seed_build_times,
     served_copy,
 )
 
@@ -105,6 +108,15 @@ class BridgePolicyTests(unittest.TestCase):
 
         overloaded = refresh_route_plan("bandcamp", 241, batch_size=20, schedule_hours=1, refresh_interval_hours=12)
         self.assertFalse(overloaded.meets_target)
+
+    def test_seed_build_times_lists_only_feeds_with_a_build_date(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            seeds = Path(tmp)
+            (seeds / "dated.rss").write_text(built_rss("Sun, 01 Nov 2026 12:00:00 +0000"), encoding="utf-8")
+            (seeds / "undated.rss").write_text(built_rss(), encoding="utf-8")
+            (seeds / "seed-build-times.json").write_text("{}", encoding="utf-8")
+
+            self.assertEqual(seed_build_times(seeds), {"dated": 1793534400.0})
 
     def test_last_build_timestamp_reads_the_channel_date_from_a_feed_prefix(self) -> None:
         rss = built_rss("Tue, 03 Nov 2026 12:00:00 +0000")
