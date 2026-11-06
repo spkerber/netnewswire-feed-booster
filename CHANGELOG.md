@@ -42,6 +42,7 @@ Notable changes per release. The [GitHub releases](https://github.com/spkerber/n
 
 ### Fixed
 
+- A custom-domain Bandcamp storefront no longer loses its whole rebuild when Bandcamp drops one release lookup. The feed keeps the links it has and the next refresh continues from there. Before, a storefront with many unlinked releases could fail on every refresh and never move.
 - **Bandcamp storefronts on a custom domain refresh again on a Mac.** Since about August 2026, some have answered every request from this tool with a redirect loop, though a browser still gets the page. The custom domain answers 303 to the artist's `bandcamp.com` address, which answers 301 straight back. Both hosts are within the source's redirect allowlist, so urllib followed the loop until it gave up. Those feeds kept serving their last copy: 17 in one profile had not been rebuilt in three months. `refresh-bandcamp-local-feeds` now builds a custom-domain artist or label from its `band_details` discography on `bandcamp.com` whenever the registry knows its band id, and never requests the storefront.
   - **Links stay stable.** The discography has no release URLs, so a release the feed already links keeps that link and GUID, matched by artwork id, and isn't shown again as unread.
   - **New releases cost one lookup each.** A release the feed hasn't linked yet gets one `tralbum_details` lookup on `bandcamp.com`, paced like every other request and capped at 10 per source per refresh. Any left over wait for a later refresh.
